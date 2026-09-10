@@ -1,0 +1,26 @@
+# sources 테이블 시드 데이터 (T-003)
+#
+# 각 소스의 조사 근거는 docs/adapters/<id>.md 에 있다.
+# 새 소스를 추가하기 전에 CLAUDE.md §5 의 체크리스트를 먼저 수행할 것.
+#
+# 주의: 여기 값은 소스의 "정적 설정"이다. is_enabled / disabled_reason /
+# last_crawled_at 같은 운영 상태는 여기서 관리하지 않으며, 재시드해도 덮어쓰지 않는다.
+
+- id: gimbab
+  display_name: 김밥레코즈
+  base_url: https://gimbabrecords.com
+  kind: shop
+  crawl_interval_sec: 1800
+
+- id: secondtrack
+  display_name: 세컨드트랙
+  base_url: https://secondtrack.kr
+  kind: shop
+  crawl_interval_sec: 1800
+
+# 유통사. 스토어는 레이블 사이트(poclanos.com)가 아니라 b.stage 에 있다.
+- id: poclanos
+  display_name: 포크라노스
+  base_url: https://poclanos.bstage.in
+  kind: distributor
+  crawl_interval_sec: 1800

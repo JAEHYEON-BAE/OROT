@@ -1,0 +1,29 @@
+# 상시 운영 오버레이 (T-120).
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+#   (Makefile 의 `make prod` 가 이 명령입니다)
+#
+# 개발용 compose.yaml 과 나누어 둔 이유: 한 파일에 두 모드를 섞으면 개발 중에
+# 실수로 운영 설정이 섞여 들어가거나, 반대로 운영에 `next dev` 가 올라간다.
+name: vinyl-radar
+
+services:
+  api:
+    # `local` 이 아니면 settings.py 가 기본 운영자 키를 거부한다.
+    environment:
+      ENVIRONMENT: production
+
+  collector:
+    environment:
+      ENVIRONMENT: production
+
+  web:
+    build:
+      target: prod
+    environment:
+      NODE_ENV: production
+      # 개발 서버가 아니므로 폴링 감시가 필요 없다.
+      WATCHPACK_POLLING: "false"
+    # **소스 마운트를 걷어낸다.** 이미지 안에서 빌드한 결과를 쓴다 —
+    # 마운트를 남기면 호스트의 편집 중인 파일이 운영 서버에 그대로 반영된다.
+    volumes: !reset []

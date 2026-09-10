@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 백업 (DB 덤프는 커밋하지 않는다 — 용량과 개인정보 양쪽 이유)
+backups/
+*.sql.gz
+
+# 환경
+.env
+.env.*
+!.env.example
+
+# Node (T-011 이후)
+node_modules/
+.next/
+out/
+
+# macOS
+.DS_Store
+
+# 에디터
+.idea/
+*.swp

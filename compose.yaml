@@ -1,0 +1,132 @@
+name: vinyl-radar
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vinyl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vinyl_local_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-vinyl_radar}
+    ports:
+      # **127.0.0.1 에만 묶는다.** 이 맥은 en0 에 공인 IP 가 직접 붙어 있어서,
+      # 주소를 생략하면 0.0.0.0 에 바인딩되어 인터넷에서 DB 에 바로 닿는다.
+      # 외부 공개는 Tailscale Funnel 이 3000 번만 골라서 담당한다 (T-120).
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # api 가 DB 준비 전에 기동해 healthz 가 503 을 내는 것을 막는다.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vinyl} -d ${POSTGRES_DB:-vinyl_radar}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://vinyl:vinyl_local_dev_only@postgres:5432/vinyl_radar}
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # **운영자 API 의 유일한 인증 수단.** 전달되지 않으면 settings.py 의 기본값이
+      # 조용히 쓰여, 공개된 서버에서 누구나 일정을 등록·삭제할 수 있게 된다.
+      # 그래서 비어 있으면 기동을 실패시킨다 (T-120).
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?.env 에 ADMIN_API_KEY 를 설정하십시오}
+      # colima/Docker Desktop 의 마운트(virtiofs 등)는 inotify 이벤트를 전달하지 않는다.
+      # 폴링을 강제하지 않으면 --reload 가 켜져 있어도 코드 변경이 반영되지 않는다.
+      WATCHFILES_FORCE_POLLING: ${WATCHFILES_FORCE_POLLING:-true}
+      # 호스트의 __pycache__ 가 마운트로 딸려 들어온다. 컨테이너가 호스트가 쓴 .pyc 를
+      # 읽으면 손상 시 `EOFError: marshal data too short` 로 워커가 죽는다.
+      # 캐시 위치를 마운트 밖으로 빼서 호스트/컨테이너 바이트코드를 완전히 분리한다.
+      PYTHONPYCACHEPREFIX: /tmp/pycache
+      # Web Push (ADR-0006). 비어 있으면 푸시만 꺼지고 나머지는 정상 동작한다.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    ports:
+      # 운영자 API(/admin)가 여기 있다. 절대 외부에 직접 노출하지 않는다.
+      - "127.0.0.1:${API_HOST_PORT:-8000}:8000"
+    volumes:
+      # 로컬 개발 편의: 소스 변경이 즉시 반영된다 (editable 설치이므로 가능).
+      - ./apps/api/src:/app/apps/api/src
+      - ./packages/core/src:/app/packages/core/src
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+    command:
+      ["uvicorn", "vinyl_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  collector:
+    build:
+      context: .
+      dockerfile: apps/collector/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://vinyl:vinyl_local_dev_only@postgres:5432/vinyl_radar}
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CRAWLER_USER_AGENT: ${CRAWLER_USER_AGENT:?.env 에 CRAWLER_USER_AGENT 를 설정하십시오 (블루프린트 §3.4)}
+      CRAWLER_RATE_LIMIT_RPS: ${CRAWLER_RATE_LIMIT_RPS:-0.5}
+      CRAWLER_MAX_CONCURRENCY: ${CRAWLER_MAX_CONCURRENCY:-2}
+      # 수집기는 운영자 API 를 부르지 않지만 **같은 Settings 를 로드한다.**
+      # 빠뜨리면 ENVIRONMENT=production 에서 기본 키 검증에 걸려 기동에 실패한다.
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?.env 에 ADMIN_API_KEY 를 설정하십시오}
+      PYTHONPYCACHEPREFIX: /tmp/pycache  # api 서비스와 동일한 사유
+      # Web Push (ADR-0006). 비어 있으면 푸시만 꺼지고 나머지는 정상 동작한다.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+      # **알림을 눌렀을 때 갈 주소.** 기본값(localhost)을 그대로 두면 휴대폰에서
+      # 알림을 눌러도 아무 데도 가지 못한다 — 발송은 성공했는데 링크만 죽는다.
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
+    volumes:
+      - ./apps/collector/src:/app/apps/collector/src
+      - ./packages/core/src:/app/packages/core/src
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      # 기본은 개발 단계. 상시 운영은 compose.prod.yaml 이 prod 로 바꾼다 (T-120).
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # 서버 컴포넌트는 컨테이너 내부 주소로 API 를 부른다 (CORS 불필요).
+      API_BASE_URL: http://api:8000
+      # 구독 화면에 보여 줄 주소는 브라우저가 접근 가능한 공개 주소여야 한다.
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+      WATCHPACK_POLLING: "true"  # virtiofs 마운트에서 파일 변경 감지 (api 와 같은 사유)
+    ports:
+      # Tailscale Funnel 이 호스트의 localhost:3000 을 공개한다.
+      # 여기서 0.0.0.0 으로 열 이유가 없다.
+      - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
+    volumes:
+      - ./apps/web/app:/app/app
+      - ./apps/web/lib:/app/lib
+      # 서비스워커와 PWA 아이콘. 마운트하지 않으면 sw.js 수정이 이미지를 다시
+      # 빌드할 때까지 반영되지 않는다 (T-117).
+      - ./apps/web/public:/app/public
+      - ./apps/web/next.config.ts:/app/next.config.ts
+
+volumes:
+  postgres_data:
