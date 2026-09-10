@@ -18,3 +18,10 @@ fi
 
 make backup
 make backup-prune
+
+# .env 도 함께. DB 만 있고 키가 없으면 복구해도 푸시가 살아나지 않는다.
+# 암호가 키체인에 없으면 스크립트가 실패하는데, 그것 때문에 DB 백업까지
+# 실패한 것처럼 보이지 않도록 여기서 흡수한다.
+if ! infra/env-backup.sh; then
+  log "경고: .env 백업에 실패했습니다 ('make backup-env-setup' 을 실행했는지 확인)"
+fi

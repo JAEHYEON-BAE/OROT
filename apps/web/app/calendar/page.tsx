@@ -14,6 +14,13 @@ function kstDayKey(iso: string): string {
 
 type Marker = { release: Release; kind: "preorder" | "release" };
 
+/** `YYYY-MM` 만 받아들인다. 형식이나 범위가 어긋나면 null. */
+function parseMonth(month: string | undefined): Date | null {
+  if (!month || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
+  const parsed = new Date(`${month}-01T00:00:00+09:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export default async function CalendarPage({
   searchParams,
 }: {
@@ -21,7 +28,10 @@ export default async function CalendarPage({
 }) {
   const { month } = await searchParams;
   const today = new Date();
-  const base = month ? new Date(`${month}-01T00:00:00+09:00`) : today;
+  // **쿼리 문자열은 인증 없이 누구나 넣는다.** 검증 없이 Date 에 넘기면 Invalid Date 가
+  // 되고, 그 NaN 이 아래 Array 길이로 흘러 `RangeError` → 500 이 된다 (T-121).
+  // 잘못된 값은 오류가 아니라 **이번 달**로 다룬다 — 링크를 잘못 눌렀을 뿐이다.
+  const base = parseMonth(month) ?? today;
   const year = base.getFullYear();
   const monthIndex = base.getMonth();
 

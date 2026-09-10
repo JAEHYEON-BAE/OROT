@@ -213,7 +213,13 @@ async def _test_push(*, cases: list[str], event_type: str, dry_run: bool) -> tup
     for name in cases:
         # 저장하지 않는 임시 객체다. 세션에 넣지 않으므로 DB 에 남지 않는다.
         release, artist_name = _release_for(name)
-        payloads.append((name, build_payload(event, release, artist_name, base_url)))
+        payload = build_payload(event, release, artist_name, base_url)
+        # **가짜 발매의 상세 페이지는 없다.** 그대로 두면 알림을 눌렀을 때 404 가
+        # 뜨는데, 진단 도구가 막다른 길로 보내면 "발송은 됐는데 링크가 죽었나?"를
+        # 구분할 수 없다 — 그것 때문에 `PUBLIC_WEB_URL` 누락을 찾기가 어려웠다.
+        # 홈으로 보내면 주소가 살아 있는지까지 한 번에 확인된다.
+        payload["url"] = base_url
+        payloads.append((name, payload))
 
     for name, payload in payloads:
         typer.echo(f"[{name}]")

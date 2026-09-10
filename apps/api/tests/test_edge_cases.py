@@ -292,7 +292,7 @@ def test_push_payload_is_always_displayable(case: EdgeCase) -> None:
     assert payload["title"]
     assert payload["body"]
     assert str(payload["url"]).startswith("https://e.com/releases/")
-    assert payload["tag"] == "release-1"
+    assert payload["tag"] == "release-1-PREORDER_OPEN"
 
 
 def test_push_payload_without_artist_falls_back_to_title() -> None:
@@ -386,18 +386,50 @@ def test_notification_url_is_absolute_and_same_origin(case: EdgeCase) -> None:
     assert parsed.path.startswith("/releases/")
 
 
-def test_notification_tag_groups_by_release_not_by_event() -> None:
-    """같은 발매의 알림은 한 자리에 쌓인다.
+def test_notification_tag_separates_events_so_history_survives() -> None:
+    """서로 다른 알림은 서로를 지우지 않는다 (T-122).
 
-    이벤트마다 tag 가 다르면 '예약 임박'과 '예약 시작'이 따로 남아,
-    사용자는 이미 지난 알림을 계속 본다.
+    브라우저는 같은 `tag` 의 알림을 대체한다. 발매 단위로 묶으면 '예약 임박'이
+    '예약 시작'에 덮여 **알림 목록에서 사라진다.** 목록은 상태가 아니라 기록이고,
+    놓친 알림을 나중에 돌아보는 곳이다.
+
+    피드는 반대로 발매당 하나만 싣는다 (T-118) — 그쪽은 지금 상태를 보는 화면이다.
+    두 규칙이 다른 것은 두 화면의 목적이 다르기 때문이다.
     """
     case = next(c for c in ACCEPTED if c.name == "only_preorder")
     soon = _payload_for(case, EventType.PREORDER_OPENS_SOON.value)
     now = _payload_for(case, EventType.PREORDER_OPEN.value)
-    assert soon["tag"] == now["tag"]
-    # 다만 **내용은 달라야** 한다. 같으면 대체됐는지 알 수 없다.
+    assert soon["tag"] != now["tag"]
     assert soon["title"] != now["title"]
+
+
+def test_same_event_refired_replaces_the_stale_one() -> None:
+    """일정이 바뀌어 다시 발생한 알림은 **옛것을 대체해야** 한다 (T-119).
+
+    옛 '예약 시작'은 틀린 시각을 말하고 있다. 두 개가 나란히 남으면
+    어느 쪽을 믿어야 할지 알 수 없다 — 그래서 같은 이벤트끼리는 tag 가 같다.
+    """
+    case = next(c for c in ACCEPTED if c.name == "only_preorder")
+    first = _payload_for(case, EventType.PREORDER_OPEN.value)
+    refired = _payload_for(case, EventType.PREORDER_OPEN.value)
+    assert first["tag"] == refired["tag"]
+
+
+def test_tag_includes_the_release_id() -> None:
+    """다른 발매의 알림이 서로를 지우면 안 된다.
+
+    카탈로그의 시험용 객체는 id 가 모두 1 이라 여기서 직접 만들어 비교한다.
+    """
+    event = _Event(EventType.PREORDER_OPEN.value)
+    base = _Release(next(c for c in ACCEPTED if c.name == "only_preorder"))
+
+    base.id = 7
+    seven = str(build_payload(event, base, None, "https://e.com")["tag"])  # type: ignore[arg-type]
+    base.id = 8
+    eight = str(build_payload(event, base, None, "https://e.com")["tag"])  # type: ignore[arg-type]
+
+    assert seven != eight
+    assert seven == "release-7-PREORDER_OPEN"
 
 
 def test_service_worker_renotifies_on_replaced_notification() -> None:

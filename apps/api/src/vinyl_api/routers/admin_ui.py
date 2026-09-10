@@ -334,6 +334,16 @@ $("#f").addEventListener("submit", async (e) => {
 });
 
 // ── 목록 ────────────────────────────────────────────────────
+// **문자열로 HTML 을 만들 때는 반드시 이스케이프한다** (T-121).
+// 제목·아티스트·판매처 이름은 사람이 입력한 값이라 `<img onerror=...>` 가 들어올 수
+// 있고, 그러면 이 화면에서 실행된다 — 운영자 키가 sessionStorage 에 있으므로
+// 여기서의 XSS 는 곧 운영자 권한 탈취다.
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+
 async function load() {
   const fmt = (t) => (t ? new Date(t).toLocaleString("ko-KR") : "-");
   try {
@@ -341,9 +351,9 @@ async function load() {
     $("#list tbody").innerHTML = rows.map((r) => `
       <tr class="${r.is_published ? "" : "draft"}">
         <td>${r.id}</td>
-        <td>${r.artist_name ? r.artist_name + " — " : ""}${r.title}</td>
-        <td>${fmt(r.preorder_opens_at)}</td>
-        <td>${r.links.length ? r.links.map((l) => l.shop_name).join(", ") : "-"}</td>
+        <td>${esc(r.artist_name ? r.artist_name + " — " : "")}${esc(r.title)}</td>
+        <td>${esc(fmt(r.preorder_opens_at))}</td>
+        <td>${r.links.length ? esc(r.links.map((l) => l.shop_name).join(", ")) : "-"}</td>
         <td>${r.is_published ? "공개" : "초안"}</td>
         <td>
           <button data-act="edit" data-id="${r.id}">수정</button>

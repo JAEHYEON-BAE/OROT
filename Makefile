@@ -12,7 +12,7 @@ VENV_PY    := $(VENV)/bin/python
 PKGS       := packages/core apps/api apps/collector
 
 .DEFAULT_GOAL := help
-.PHONY: help up down prod prod-down prod-logs backup-prune logs ps migrate migrate-down migrate-status revision seed backup restore backups test lint format openapi venv install clean healthz
+.PHONY: help up down prod prod-down prod-logs backup-env backup-env-setup restore-env backups-env backup-prune logs ps migrate migrate-down migrate-status revision seed backup restore backups test lint format openapi venv install clean healthz
 
 help:  ## 사용 가능한 타깃 목록
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -102,6 +102,28 @@ restore: .env  ## FILE=backups/xxx.sql.gz 에서 복구 — **기존 데이터�
 	@echo "!! $(FILE) 로 복구하면 현재 DB 내용을 덮어씁니다."
 	@printf '   계속하려면 yes 를 입력하세요: '; read ans; test "$$ans" = "yes" || { echo "취소함"; exit 1; }
 	@user="$${PG_USER:-$(PG_USER)}"; db="$${PG_DB:-$(PG_DB)}"; 	 user=$${user:-vinyl}; db=$${db:-vinyl_radar}; 	 gunzip -c "$(FILE)" | $(DC) exec -T postgres psql -U "$$user" -d "$$db" -q 	 && echo "복구 완료: $(FILE)"
+
+# ─── .env 암호화 백업 (T-120) ────────────────────────────────────
+# `backup` 은 DB 만 덤프한다. 그 DB 를 쓸모 있게 만드는 VAPID 개인키는 .env 에만
+# 있어서, 디스크가 죽으면 **등록된 푸시 구독이 전부 무효**가 된다.
+
+backup-env-setup: ## .env 백업 암호를 맥 키체인에 저장 (최초 1회, 직접 입력)
+	@echo "이 암호로 .env 백업을 암호화합니다."
+	@echo "**반드시 비밀번호 관리자에도 같이 저장하십시오** — 키체인은 이 디스크에"
+	@echo "있으므로, 디스크가 죽으면 키체인도 함께 사라집니다."
+	@security add-generic-password -U -s vinyl-radar-env-backup -a "$$USER" -w
+	@echo "키체인에 저장했습니다."
+
+backup-env: ## .env 를 암호화해 백업 (내용이 안 바뀌었으면 건너뜀)
+	@infra/env-backup.sh
+
+restore-env: ## FILE=<...env.enc> 에서 .env 복구 — **기존 .env 를 덮어씁니다**
+	@test -n "$(FILE)" || { echo "!! 사용법: make restore-env FILE=backups/env/xxx.env.enc"; exit 1; }
+	@infra/env-restore.sh "$(FILE)"
+
+backups-env: ## .env 백업 목록
+	@dir="$$(infra/env-backup.sh --where)"; \
+	 ls -lht "$$dir"/*.env.enc 2>/dev/null || echo "백업이 없습니다 ($$dir)"
 
 backup-prune: ## 백업을 최근 30개만 남기고 정리 (자동 백업이 디스크를 채우지 않도록)
 	@ls -1t $(BACKUP_DIR)/*.sql.gz 2>/dev/null | tail -n +31 | while read f; do \

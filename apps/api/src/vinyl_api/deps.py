@@ -1,5 +1,6 @@
 """FastAPI 의존성."""
 
+import secrets
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -26,8 +27,12 @@ async def require_admin(x_admin_key: Annotated[str | None, Header()] = None) -> 
     헤더 하나로 끝낸다 — 사용자가 1명(운영자)인 단계에서 OAuth 는 과설계다.
     실패 사유를 구분해 알려주지 않는다 (키 존재 여부가 새지 않도록).
     """
+    # **상수 시간 비교** (T-121). `!=` 는 첫 불일치 바이트에서 끝나므로, 응답 시간
+    # 차이로 키를 한 글자씩 좁혀 나갈 여지가 남는다. 한 줄로 그 여지를 없앤다.
     expected = get_settings().admin_api_key
-    if not x_admin_key or x_admin_key != expected:
+    if not expected.strip() or not secrets.compare_digest(
+        (x_admin_key or "").encode(), expected.encode()
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="운영자 인증이 필요합니다.",

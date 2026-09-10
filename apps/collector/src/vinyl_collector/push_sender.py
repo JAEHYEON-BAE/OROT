@@ -10,12 +10,13 @@
 
 import asyncio
 import json
-from typing import Final
+from typing import Any, Final
 
+import requests
 import structlog
 from pywebpush import WebPushException, webpush
 from vinyl_core.models import DeviceToken
-from vinyl_core.notifications import SendOutcome, SendResult
+from vinyl_core.notifications import SendOutcome, SendResult, is_allowed_push_endpoint
 from vinyl_core.settings import get_settings
 
 log = structlog.get_logger(__name__)
@@ -28,6 +29,23 @@ TTL_SECONDS: Final = 6 * 60 * 60
 GONE_STATUS: Final = frozenset({404, 410})
 
 REQUEST_TIMEOUT: Final = 10
+
+
+class _PushSession(requests.Session):
+    """Never follow redirects outside the validated push endpoint."""
+
+    def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        kwargs["allow_redirects"] = False
+        return super().request(method, url, **kwargs)
+
+
+def _send_push(**kwargs: Any) -> requests.Response:
+    # One session per worker call; no shared mutable Session between threads.
+    with _PushSession() as session:
+        response = webpush(requests_session=session, **kwargs)
+        if not 200 <= response.status_code < 300:
+            raise WebPushException("Push service rejected delivery", response=response)
+        return response
 
 
 class WebPushSender:
@@ -48,13 +66,23 @@ class WebPushSender:
             # 키 없이는 암호화가 불가능하다. 재시도해도 달라지지 않는다.
             return SendResult(SendOutcome.GONE, "구독에 암호화 키가 없음")
 
+        # **입력 검증만으로는 부족하다** (T-121). 허용 목록이 생기기 전에 등록된 행이
+        # DB 에 남아 있을 수 있고, 그 주소로 요청을 보내는 것은 이쪽이다.
+        # 보내기 직전에 한 번 더 확인해야 SSRF 경로가 실제로 닫힌다.
+        if not is_allowed_push_endpoint(subscription.token):
+            log.warning(
+                "push.endpoint_not_allowed",
+                subscription_id=subscription.id,
+            )
+            return SendResult(SendOutcome.GONE, "허용되지 않은 엔드포인트")
+
         info = {
             "endpoint": subscription.token,
             "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
         }
         try:
             await asyncio.to_thread(
-                webpush,
+                _send_push,
                 subscription_info=info,
                 data=json.dumps(payload, ensure_ascii=False),
                 vapid_private_key=self._private_key,
@@ -70,12 +98,13 @@ class WebPushSender:
                 "push.send_failed",
                 subscription_id=subscription.id,
                 status=status,
-                error=str(exc)[:200],
             )
-            return SendResult(SendOutcome.FAILED, f"HTTP {status}: {str(exc)[:200]}")
+            return SendResult(SendOutcome.FAILED, f"HTTP {status}")
         except Exception as exc:
             # 네트워크 오류 등. 다음 주기에 다시 시도한다.
-            log.warning("push.send_error", subscription_id=subscription.id, error=str(exc)[:200])
-            return SendResult(SendOutcome.FAILED, str(exc)[:200])
+            # Exceptions can contain endpoint capabilities or subscription keys.
+            error = type(exc).__name__
+            log.warning("push.send_error", subscription_id=subscription.id, error=error)
+            return SendResult(SendOutcome.FAILED, error)
 
         return SendResult(SendOutcome.SENT)

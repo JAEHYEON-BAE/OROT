@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from vinyl_core.enums import Curation
@@ -11,9 +12,24 @@ class ReleaseLinkIn(BaseModel):
     """구매 링크 입력."""
 
     shop_name: str = Field(min_length=1, max_length=200)
-    url: str = Field(min_length=1)
+    url: str = Field(min_length=1, max_length=2048)
     source_id: str | None = None
     price_krw: Decimal | None = None
+
+    @field_validator("url")
+    @classmethod
+    def _http_scheme_only(cls, v: str) -> str:
+        """`http`/`https` 만 받는다 (T-121).
+
+        이 값은 공개 화면에서 `<a href>` 로 그대로 쓰인다. `javascript:` 를
+        저장할 수 있으면 **저장형 XSS** 가 된다 — 지금은 운영자만 등록하지만,
+        운영자 키가 새는 순간 방문자 전원에게 실행된다.
+        """
+        scheme = urlparse(v).scheme.lower()
+        if scheme not in {"http", "https"}:
+            msg = "url 은 http 또는 https 여야 합니다."
+            raise ValueError(msg)
+        return v
 
     @field_validator("price_krw")
     @classmethod

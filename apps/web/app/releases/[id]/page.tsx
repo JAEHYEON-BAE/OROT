@@ -6,8 +6,12 @@ import { formatDate, formatDateTime, relativeFromNow, releaseLabel } from "@/lib
 export const dynamic = "force-dynamic";
 
 async function getRelease(id: string): Promise<Release | null> {
+  // **경로 조각은 누구나 넣는다.** 숫자가 아니면 API 를 부르지도 않는다 —
+  // 부르면 422 가 오고, 그것을 던지면 500 이 된다 (T-121).
+  if (!/^\d{1,18}$/.test(id)) return null;
+
   const res = await fetch(`${apiBase}/v1/releases/${id}`, { cache: "no-store" });
-  if (res.status === 404) return null;
+  if (res.status === 404 || res.status === 422) return null;
   if (!res.ok) throw new Error(`API ${res.status}`);
   return res.json() as Promise<Release>;
 }

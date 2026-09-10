@@ -4,11 +4,26 @@ DB 없이 스키마와 설정 계약만 검사한다.
 구독·해지 흐름은 컨테이너에서 실제 요청으로 검증했다.
 """
 
+import base64
+
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from pydantic import ValidationError
 from vinyl_core.settings import Settings
 
 from vinyl_api.schemas.push import PushSubscriptionIn, PushUnsubscribeIn
+
+PUBLIC_KEY = (
+    base64.urlsafe_b64encode(
+        ec.derive_private_key(1, ec.SECP256R1())
+        .public_key()
+        .public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+    )
+    .decode()
+    .rstrip("=")
+)
+AUTH = base64.urlsafe_b64encode(bytes(range(16))).decode().rstrip("=")
 
 
 def test_subscription_accepts_browser_json_shape() -> None:
@@ -19,11 +34,11 @@ def test_subscription_accepts_browser_json_shape() -> None:
     payload = PushSubscriptionIn.model_validate(
         {
             "endpoint": "https://fcm.googleapis.com/fcm/send/abc",
-            "keys": {"p256dh": "BPubKey", "auth": "AuthSecret"},
+            "keys": {"p256dh": PUBLIC_KEY, "auth": AUTH},
         }
     )
     assert payload.endpoint.endswith("/abc")
-    assert payload.keys.p256dh == "BPubKey"
+    assert payload.keys.p256dh == PUBLIC_KEY
 
 
 @pytest.mark.parametrize(

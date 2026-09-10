@@ -18,6 +18,7 @@ from vinyl_core.logging import configure_logging
 from vinyl_core.settings import get_settings
 
 from vinyl_api.problems import register_problem_handlers
+from vinyl_api.request_limits import PushBodyLimitMiddleware
 from vinyl_api.routers import admin, admin_ui, calendar, feed, push, releases, rss
 
 log = structlog.get_logger(__name__)
@@ -47,6 +48,7 @@ app = FastAPI(
 
 
 register_problem_handlers(app)
+app.add_middleware(PushBodyLimitMiddleware)
 
 app.include_router(admin.router)
 app.include_router(admin_ui.router)

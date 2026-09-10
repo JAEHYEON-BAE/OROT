@@ -6,12 +6,13 @@ RSS·iCalendar 를 계정 없이 구독하게 한 것과 같은 이유다.
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from vinyl_core.enums import DevicePlatform
 from vinyl_core.models import DeviceToken
 from vinyl_core.settings import get_settings
 
 from vinyl_api.deps import SessionDep
+from vinyl_api.rate_limit import MAX_ACTIVE_SUBSCRIPTIONS, subscribe_limiter
 from vinyl_api.schemas.push import (
     PushPublicKeyOut,
     PushSubscriptionIn,
@@ -48,6 +49,15 @@ async def subscribe(payload: PushSubscriptionIn, session: SessionDep) -> PushSub
             status.HTTP_503_SERVICE_UNAVAILABLE, "서버에 푸시가 설정되어 있지 않습니다."
         )
 
+    # 인증이 없는 쓰기 경로다 (ADR-0006). 상한이 없으면 인터넷의 누구나
+    # `device_tokens` 를 무한히 채울 수 있고, 그 행마다 발송기가 매 주기 요청을 시도한다.
+    if not subscribe_limiter.allow():
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "구독 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(subscribe_limiter.retry_after)},
+        )
+
     existing = await session.scalar(
         select(DeviceToken).where(
             DeviceToken.platform == DevicePlatform.WEB.value,
@@ -64,6 +74,17 @@ async def subscribe(payload: PushSubscriptionIn, session: SessionDep) -> PushSub
         await session.flush()
         log.info("push.subscription.refreshed", subscription_id=existing.id)
         return PushSubscriptionOut(id=existing.id, endpoint=existing.token, created=False)
+
+    # 총량 상한. **기존 구독자의 알림은 그대로 나간다** — 폭주가 서비스를 멈추면 안 된다.
+    active = await session.scalar(
+        select(func.count()).select_from(DeviceToken).where(DeviceToken.is_active.is_(True))
+    )
+    if (active or 0) >= MAX_ACTIVE_SUBSCRIPTIONS:
+        log.warning("push.subscription.capacity_reached", active=active)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "구독 정원이 가득 찼습니다. 운영자에게 문의해 주세요.",
+        )
 
     subscription = DeviceToken(
         platform=DevicePlatform.WEB,

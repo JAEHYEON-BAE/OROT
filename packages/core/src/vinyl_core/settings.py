@@ -63,9 +63,13 @@ class Settings(BaseSettings):
         `compose.yaml` 이 `ADMIN_API_KEY` 를 필수로 넘기지 않아 컨테이너가 이
         기본값을 쓰고 있던 적이 실제로 있었다 (T-120).
         """
-        if self.environment != "local" and self.admin_api_key == DEV_ADMIN_KEY:
+        if not self.admin_api_key.strip():
+            raise ValueError("ADMIN_API_KEY 는 비어 있을 수 없습니다.")
+        if self.environment != "local" and (
+            self.admin_api_key == DEV_ADMIN_KEY or len(self.admin_api_key.strip()) < 32
+        ):
             msg = (
-                "ENVIRONMENT 가 local 이 아닌데 ADMIN_API_KEY 가 개발용 기본값입니다. "
+                "local 외부에서는 ADMIN_API_KEY 에 32자 이상의 비밀 키가 필요합니다. "
                 "`openssl rand -base64 32` 로 생성해 .env 에 설정하십시오."
             )
             raise ValueError(msg)

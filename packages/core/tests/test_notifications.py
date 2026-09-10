@@ -61,8 +61,9 @@ def test_payload_has_everything_the_browser_needs() -> None:
     assert payload["title"] == "[예약 시작] 실리카겔 — Machine Boy"
     assert payload["body"] == "2LP · 한정반 · Clear Vinyl"
     assert payload["url"] == "http://localhost:3000/releases/1"
-    # 같은 발매의 알림이 쌓이지 않도록 브라우저가 묶는 키.
-    assert payload["tag"] == "release-1"
+    # 브라우저가 알림을 묶는 키. **발매가 아니라 이벤트 단위**다 (T-122) —
+    # 발매 단위로 묶으면 '예약 임박'이 '예약 시작'에 덮여 목록에서 사라진다.
+    assert payload["tag"] == "release-1-PREORDER_OPEN"
 
 
 def test_payload_without_artist_uses_title_only() -> None:

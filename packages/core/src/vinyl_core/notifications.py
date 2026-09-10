@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final, Protocol
+from urllib.parse import urlparse
 
 import structlog
 from sqlalchemy import select
@@ -48,6 +49,60 @@ _EVENT_LABEL: Final = {
     EventType.PREORDER_OPEN.value: "예약 시작",
     EventType.RELEASED.value: "발매",
 }
+
+
+# ─── 구독 엔드포인트 허용 목록 (T-121) ──────────────────────────
+#
+# **이것이 없으면 SSRF 다.** 구독 등록에는 인증이 없고(ADR-0006), `endpoint` 는
+# 클라이언트가 주는 URL 이다. 검증하지 않으면 인터넷의 누구나 임의 주소를 등록해
+# 이 서버가 그쪽으로 POST 를 보내게 만들 수 있다 — `http://127.0.0.1:8000/admin`,
+# `http://192.168.0.1/` 처럼 **밖에서는 닿지 못하게 막아 둔 내부망**이 포함된다.
+#
+# 브라우저 푸시 서비스는 종류가 정해져 있으므로 목록으로 막는 것이 정확하다.
+ALLOWED_PUSH_HOSTS: Final = frozenset(
+    {
+        "web.push.apple.com",  # Safari / iOS
+        "push.apple.com",  # 애플의 지역별 하위 도메인 대비
+        "fcm.googleapis.com",  # Chrome / Edge
+        "android.googleapis.com",  # 구형 FCM
+        "push.services.mozilla.com",  # Firefox
+        "notify.windows.com",  # Windows (WNS)
+    }
+)
+
+# 엔드포인트 길이 상한. 실제 값은 200자 안팎이다.
+# 8KB 를 넘기면 `device_tokens.token` 의 UNIQUE 인덱스가 터져 500 이 난다 —
+# 인증 없이 누구나 서버 오류를 만들 수 있는 경로였다 (T-121).
+MAX_ENDPOINT_LENGTH: Final = 2048
+
+# 브라우저가 주는 암호화 키 길이 상한 (RFC 8291). p256dh 는 65바이트, auth 는 16바이트를
+# base64url 로 담은 값이라 넉넉히 잡아도 이보다 짧다.
+MAX_PUSH_KEY_LENGTH: Final = 256
+
+
+def is_allowed_push_endpoint(endpoint: str) -> bool:
+    """알려진 푸시 서비스로 가는 https 주소인가."""
+    if (
+        not endpoint
+        or len(endpoint) > MAX_ENDPOINT_LENGTH
+        or not endpoint.isascii()
+        or any(ord(c) <= 32 or ord(c) == 127 for c in endpoint)
+        or "\\" in endpoint
+    ):
+        return False
+    try:
+        parsed = urlparse(endpoint)
+        if parsed.port not in {None, 443} or parsed.username or parsed.password or parsed.fragment:
+            return False
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+
+    host = (parsed.hostname or "").lower()
+    # **`endswith(host)` 만 쓰면 안 된다** — `evilpush.apple.com` 이
+    # `push.apple.com` 으로 끝나서 통과한다. 점 경계를 반드시 확인한다.
+    return any(host == allowed or host.endswith(f".{allowed}") for allowed in ALLOWED_PUSH_HOSTS)
 
 
 class SendOutcome(StrEnum):
@@ -115,10 +170,19 @@ def build_payload(
         "title": _one_line(f"[{action}] {label}"),
         "body": _one_line(" · ".join(details)) or "자세히 보려면 눌러 주세요",
         "url": f"{base_url}/releases/{release.id}",
-        # 같은 발매의 알림이 여러 개 쌓이지 않도록 브라우저가 묶는다.
-        # 묶으면 **뒤에 온 알림이 앞의 것을 조용히 대체**하므로, 서비스워커는
-        # renotify 를 켜서 '예약 임박' 뒤에 온 '예약 시작'을 놓치지 않게 한다.
-        "tag": f"release-{release.id}",
+        # 브라우저는 같은 `tag` 의 알림을 **하나로 묶어 뒤엣것이 앞엣것을 대체**한다.
+        #
+        # 그래서 발매 단위가 아니라 **이벤트 단위**로 묶는다 (T-122).
+        # 발매 단위로 묶으면 '예약 임박'이 '예약 시작'에 덮여 사라지는데,
+        # 알림 목록은 상태가 아니라 **기록**이다 — 놓친 알림을 나중에 돌아보는 곳이라
+        # 지워 버리면 "예약이 언제 시작한다고 했더라"를 확인할 방법이 없다.
+        # (피드는 반대로 발매당 하나만 보여 준다. 그쪽은 지금 상태를 보는 화면이다.)
+        #
+        # 이벤트 단위로 묶어도 필요한 대체는 그대로 일어난다 — 일정이 바뀌어
+        # 옛 '예약 시작'이 무효화되고(T-119) 새 시각으로 다시 발생하면, tag 가 같아
+        # **틀린 시각을 말하던 알림이 새것으로 교체된다.** 그때 소리가 나도록
+        # 서비스워커가 renotify 를 켠다.
+        "tag": f"release-{release.id}-{event.event_type}",
         "event_type": str(event.event_type),
     }
 
