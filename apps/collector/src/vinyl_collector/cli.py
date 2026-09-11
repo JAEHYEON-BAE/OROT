@@ -13,6 +13,7 @@ import typer
 from sqlalchemy import select
 from vinyl_core import __version__ as core_version
 from vinyl_core.adapters import get_adapter
+from vinyl_core.alerts import Alert
 from vinyl_core.db import session_scope
 from vinyl_core.enums import DevicePlatform, EventType
 from vinyl_core.logging import configure_logging
@@ -26,6 +27,7 @@ from vinyl_collector.bridge import FetcherPageAdapter
 from vinyl_collector.fetcher import Fetcher, FetchOutcome, SourceBlockedError
 from vinyl_collector.push_sender import WebPushSender
 from vinyl_collector.scheduler import run as run_scheduler
+from vinyl_collector.slack_alerter import SlackAlerter
 
 app = typer.Typer(help="Vinyl Radar 수집기", no_args_is_help=True)
 
@@ -73,6 +75,49 @@ _DEFAULT_CASE: Final = "기본"
 
 # 연속 발송 사이의 간격. 푸시 서비스에 한꺼번에 몰아넣지 않는다.
 _SEND_GAP_SECONDS: Final = 0.5
+
+
+@app.command("test-alert")
+def test_alert() -> None:
+    """운영자 알림 채널(Slack)이 실제로 닿는지 확인한다 (T-116).
+
+    `test-push` 와 같은 이유로 따로 둔다 — 알림이 안 올 때 **채널 설정**이 문제인지
+    **발송 로직**이 문제인지 구분되지 않으면 어디를 봐야 할지 알 수 없다.
+    DB 를 전혀 바꾸지 않는다.
+    """
+    configure_logging()
+    settings = get_settings()
+
+    if not settings.alerts_enabled:
+        typer.echo(
+            "SLACK_WEBHOOK_URL 이 설정되지 않았습니다. "
+            ".env 에 넣고 `docker compose up -d collector` 로 재생성하십시오.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"환경 : {settings.environment}")
+    typer.echo("채널 : Slack Incoming Webhook (URL 은 비밀이라 출력하지 않습니다)")
+    typer.echo("")
+
+    delivered = asyncio.run(
+        SlackAlerter().send(
+            Alert(
+                key="alert.test",
+                title="시험 알림 — 이 메시지가 보이면 설정이 끝났습니다",
+                detail=(
+                    "운영자 알림 채널 점검입니다. 실제 장애가 아닙니다.\n"
+                    "앞으로 이 채널로 옵니다 — 스케줄러 주기 실패, "
+                    "재시도 소진, 구독 만료 해제."
+                ),
+            )
+        )
+    )
+    if delivered:
+        typer.echo("전송됨. Slack 채널을 확인하십시오.")
+        return
+    typer.echo("전송하지 못했습니다. 위 로그의 status/error 를 확인하십시오.", err=True)
+    raise typer.Exit(code=1)
 
 
 @app.command("test-push")
@@ -259,10 +304,10 @@ async def _test_push(*, cases: list[str], event_type: str, dry_run: bool) -> tup
                 elif result.outcome is SendOutcome.GONE:
                     gone += 1
                     # 구독을 끄지 않는다 — 진단 명령이 데이터를 바꾸면 안 된다.
-                    typer.echo(f"  {label:52s} 구독 만료 ({result.detail})", err=True)
+                    typer.echo(f"  {label:52s} 구독 만료 ({result.error})", err=True)
                 else:
                     failed += 1
-                    typer.echo(f"  {label:52s} 실패 ({result.detail})", err=True)
+                    typer.echo(f"  {label:52s} 실패 ({result.error})", err=True)
 
                 if len(payloads) > 1:
                     await asyncio.sleep(_SEND_GAP_SECONDS)

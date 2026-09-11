@@ -1,0 +1,59 @@
+- generic [active] [ref=f7e1]:
+  - banner [ref=f7e2]:
+    - navigation [ref=f7e3]:
+      - link "Vinyl Radar" [ref=f7e4] [cursor=pointer]:
+        - /url: /
+      - link "피드" [ref=f7e5] [cursor=pointer]:
+        - /url: /
+      - link "캘린더" [ref=f7e6] [cursor=pointer]:
+        - /url: /calendar
+      - link "구독" [ref=f7e8] [cursor=pointer]:
+        - /url: /subscribe
+  - main [ref=f7e9]:
+    - heading "발매·예약 일정" [level=1] [ref=f7e10]
+    - paragraph [ref=f7e11]:
+      - text: 예약 시작과 발매 일정을 확인하세요.
+      - link "캘린더·RSS 구독" [ref=f7e12] [cursor=pointer]:
+        - /url: /subscribe
+    - navigation "피드 정렬" [ref=f7e13]:
+      - link "최근 변경순" [ref=f7e14] [cursor=pointer]:
+        - /url: /?sort=recent
+      - link "발매 임박순" [ref=f7e15] [cursor=pointer]:
+        - /url: /?sort=imminent
+    - list "발매·예약 일정 목록" [ref=f7e16]:
+      - listitem [ref=f7e17]:
+        - generic [ref=f7e18]:
+          - generic [ref=f7e19]: 예약 예정
+          - generic [ref=f7e20]: 한정반
+          - time [ref=f7e21]: 예약 시작 · 9월 11일 (금) PM 01:00
+        - heading [level=2] [ref=f7e22]:
+          - link "루나 하버 (Luna Harbor) — [테스트] 별빛이 머무는 밤 (LP)" [ref=f7e23] [cursor=pointer]:
+            - /url: /releases/34
+        - paragraph [ref=f7e24]: 180g Midnight Blue Vinyl
+      - listitem [ref=f7e25]:
+        - generic [ref=f7e26]:
+          - generic [ref=f7e27]: 예약 예정
+          - generic [ref=f7e28]: 한정반
+          - time [ref=f7e29]: 예약 시작 · 9월 13일 (일) PM 01:36
+        - heading [level=2] [ref=f7e30]:
+          - link "Vinyl Radar 테스트 — [테스트] 알림 목록 확인용 (LP)" [ref=f7e31] [cursor=pointer]:
+            - /url: /releases/32
+        - paragraph [ref=f7e32]: 클리어
+        - link "김밥레코즈 · 55,000원" [ref=f7e34] [cursor=pointer]:
+          - /url: https://www.gimbabrecords.com/
+      - listitem [ref=f7e35]:
+        - generic [ref=f7e36]:
+          - generic [ref=f7e37]: 예약 진행 중
+          - generic [ref=f7e38]: 한정반
+          - time [ref=f7e39]: 예약 시작 · 9월 8일 (화) PM 05:47
+        - heading [level=2] [ref=f7e40]:
+          - link "Vinyl Radar 테스트 — [테스트] 알림 확인용 발매 (LP)" [ref=f7e41] [cursor=pointer]:
+            - /url: /releases/31
+        - paragraph [ref=f7e42]: 투명 레드
+        - generic [ref=f7e43]:
+          - link "김밥레코즈 · 52,000원" [ref=f7e44] [cursor=pointer]:
+            - /url: https://www.gimbabrecords.com/
+          - link "세컨트랙 · 49,000원" [ref=f7e45] [cursor=pointer]:
+            - /url: https://secondtrack.co.kr/
+  - contentinfo [ref=f7e46]: 일정은 운영자가 직접 등록합니다. 구매는 각 판매처에서 진행하세요.
+  - alert [ref=f7e47]

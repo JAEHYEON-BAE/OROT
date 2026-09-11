@@ -54,7 +54,13 @@ class PushBodyLimitMiddleware:
             )
             return
 
+        delivered = False
+
         async def bounded_receive() -> Message:
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
             return {"type": "http.request", "body": bytes(body), "more_body": False}
 
         await self.app(scope, bounded_receive, send)

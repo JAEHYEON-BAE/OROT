@@ -4,7 +4,15 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 from vinyl_core.enums import Curation
 
 
@@ -19,12 +27,15 @@ class ReleaseLinkIn(BaseModel):
     @field_validator("url")
     @classmethod
     def _http_scheme_only(cls, v: str) -> str:
-        """`http`/`https` 만 받는다 (T-121).
+        """`http`/`https` 만 받는다 (T-130).
 
         이 값은 공개 화면에서 `<a href>` 로 그대로 쓰인다. `javascript:` 를
         저장할 수 있으면 **저장형 XSS** 가 된다 — 지금은 운영자만 등록하지만,
         운영자 키가 새는 순간 방문자 전원에게 실행된다.
         """
+        if any(ord(c) < 32 for c in v):
+            raise ValueError("URL 에 제어 문자를 사용할 수 없습니다.")
+        TypeAdapter(HttpUrl).validate_python(v)
         scheme = urlparse(v).scheme.lower()
         if scheme not in {"http", "https"}:
             msg = "url 은 http 또는 https 여야 합니다."
@@ -37,8 +48,8 @@ class ReleaseLinkIn(BaseModel):
         """원화는 소수 단위가 없다 (CLAUDE.md §6)."""
         if v is None:
             return None
-        if v != v.to_integral_value() or v < 0:
-            msg = f"price_krw 는 0 이상의 정수여야 합니다: {v}"
+        if not v.is_finite() or v != v.to_integral_value() or not 0 <= v <= 999999999999:
+            msg = f"price_krw 는 0부터 999999999999 사이의 정수여야 합니다: {v}"
             raise ValueError(msg)
         return v
 
@@ -87,6 +98,13 @@ class ReleaseIn(BaseModel):
     notes: str | None = None
     links: list[ReleaseLinkIn] = Field(default_factory=list)
 
+    @field_validator("title")
+    @classmethod
+    def _nonempty_title(cls, value: str) -> str:
+        if value is None or not value.strip():
+            raise ValueError("제목은 비어 있을 수 없습니다.")
+        return value.strip()
+
     @field_validator("preorder_opens_at", "preorder_closes_at")
     @classmethod
     def _timezone_aware(cls, v: datetime | None) -> datetime | None:
@@ -134,6 +152,21 @@ class ReleaseUpdate(BaseModel):
     preorder_closes_at: datetime | None = None
     cover_url: str | None = None
     notes: str | None = None
+    links: list[ReleaseLinkIn] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def _nonempty_title(cls, value: str | None) -> str:
+        if value is None or not value.strip():
+            raise ValueError("제목은 비어 있을 수 없습니다.")
+        return value.strip()
+
+    @field_validator("is_limited")
+    @classmethod
+    def _nonnull_limited(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("is_limited 는 null 일 수 없습니다.")
+        return value
 
     @field_validator("preorder_opens_at", "preorder_closes_at")
     @classmethod
@@ -172,3 +205,7 @@ class ReleaseAdminOut(ReleaseOut):
     """운영자 응답. 메모까지 포함한다."""
 
     notes: str | None = None
+    can_delete: bool = Field(
+        default=False,
+        description="비공개이며 연결된 수집 상품이 없어 삭제 가능한가",
+    )

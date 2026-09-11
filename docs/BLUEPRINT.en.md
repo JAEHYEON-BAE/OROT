@@ -1,24 +1,19 @@
-# Vinyl Radar — Aggregated Korean Vinyl Release Tracker (English Edition)
+# Vinyl Radar — Vinyl Release and Preorder Schedule Blueprint (English)
 
-> **Purpose**: This document is the single source of truth shared by both humans and coding agents (Claude Code, Codex, etc.).
-> The Korean edition is `docs/BLUEPRINT.ko.md`. The two must stay in sync; **if they conflict, the Korean edition prevails.**
->
-> **Version**: 1.0.0
-> **Last updated**: 2026-08-20
-
----
+> **Reviewed: 2026-09-11 · Version 1.1.0**. Current behavior is described from source, migrations and runtime configuration.
+> When implementation and prose disagree, update the prose to match implementation. Planned features are not current behavior or instructions to enable them.
+> Maintain this alongside the [Korean edition](BLUEPRINT.ko.md); reconcile the Korean text first when the editions disagree, then translate.
 
 ## 0. Agent Directives (READ FIRST)
 
-Coding agents must observe the following before starting any work.
-
-1. **Work is scoped by task IDs (`T-XXX`) from `§10 Task Backlog`.** Complete exactly one task at a time and satisfy every acceptance criterion before moving on.
-2. **Before creating a file, verify its path exists in `§6 Repository Layout`.** Do not invent new top-level directories.
-3. **Never issue live requests to scraped sites from tests.** Tests must use HTML snapshots stored under `tests/fixtures/`.
-4. **Never write code that violates `§3.4 Crawling Ethics and Legal Compliance`.** In particular: no ignoring robots.txt, no request rates above 1/sec, no rehosting of source images.
-5. **One commit per task.** Message format: `feat(collector): T-014 implement Secondtrack adapter`.
-6. **Do not unilaterally settle uncertain design decisions.** Draft an ADR under `docs/adr/` and ask the user to confirm.
-7. **Always activate the project virtualenv (`.venv`) before running Python.**
+1. Follow the user-authorized scope. For backlog work, announce the existing `T-XXX` and complete one task at a time. Do not invent IDs for maintenance or reviews.
+2. Distinguish existing paths from reserved future paths in §6. Do not create undefined top-level directories.
+3. Automated tests must not request live external sites. Use saved HTML fixtures and fake push senders. `collector run --dry-run` makes live requests and is not an offline test.
+4. Follow §3.4: at most 0.5 req/s per source, at most two concurrent connections, honor robots and use metadata only.
+5. Run `make lint` and `make test` for implementation changes; also run web lint, Node tests and build for web changes. For documentation-only edits, check paths, commands and contracts without restarting services.
+6. Draft an ADR for genuinely new architectural decisions. Do not request approval again for corrections within an already authorized direction.
+7. Use `venv/bin/python`, Make targets or container Python.
+8. Preserve existing data, keys and backups. Destructive actions require authorization; prefer isolated schemas and rollback in tests. Shared-DB cleanup must use exact IDs created by that test run.
 
 ---
 
@@ -55,6 +50,8 @@ and tested but unwired, to be connected when manual entry becomes the bottleneck
 
 ### 1.3 Success Metrics (MVP)
 
+> These are product targets, not measured results or guaranteed SLAs. External silent-failure alerts are not implemented.
+
 | Metric | Target |
 |---|---|
 | Schedules published per week | ≥ 20 |
@@ -84,125 +81,73 @@ and tested but unwired, to be connected when manual entry becomes the bottleneck
 
 ## 2. Architecture Overview
 
-### 2.1 System Diagram
+### 2.1 Current Execution Flow
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Collection Layer                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
-│  │ Gimbab   │  │Secondtrack│ │ Poclanos │  │ (future) │        │
-│  │ Adapter  │  │ Adapter  │  │ Adapter  │  │ Adapter  │        │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘        │
-│       └─────────────┴─────────────┴─────────────┘               │
-│                          │                                       │
-│              ┌───────────▼────────────┐                          │
-│              │  Scheduler (APScheduler)│                          │
-│              │  · per-source cron      │                          │
-│              │  · concurrency limits   │                          │
-│              └───────────┬────────────┘                          │
-└──────────────────────────┼──────────────────────────────────────┘
-                           │ RawItem[]
-┌──────────────────────────▼──────────────────────────────────────┐
-│              Normalization & Resolution Layer                    │
-│  Normalizer → EntityResolver → EventDetector                    │
-│  · string norm.     · barcode/catalog   · snapshot diff          │
-│  · format parsing   · fuzzy (pg_trgm)   · event emission         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                     PostgreSQL 16 (+ pg_trgm)                    │
-│  raw_snapshots · listings · releases · artists · listing_events  │
-│  users · watchlist_items · device_tokens                         │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────────┐
-│                    FastAPI (REST, /v1)                           │
-│  feed · search · detail · watchlist · devices · RSS/ICS          │
-└───────┬───────────────────────────────────┬──────────────────────┘
-        │                                   │
-┌───────▼─────────┐               ┌─────────▼──────────┐
-│  Web (Next.js)  │               │  iOS (SwiftUI)     │
-│  · SSR list     │               │  · feed / search   │
-│  · SEO landing  │               │  · watchlist       │
-└─────────────────┘               │  · APNs push       │
-                                  └────────────────────┘
+```text
+Operator → localhost:8000/admin → FastAPI → PostgreSQL
+                                draft → publish → SCHEDULE_ADDED
+PostgreSQL ← collector: 60-second tick → time events → deliveries → WebPushSender
+                                                                  ↓
+                                           browser push service → sw.js → notification
+Internet → Tailscale Funnel → localhost:3000 → Next.js → internal FastAPI
+                                                ├ feed/detail/calendar/subscribe
+                                                ├ /api/push/* proxies
+                                                └ /v1/feed.rss and /v1/releases.ics proxies
 ```
 
-### 2.2 Stack Decisions and Rationale
+APScheduler in one collector generates events and dispatches deliveries in the same tick.
+There is no separate message broker, APNs sender or watchlist matching. Adapters and Fetcher
+are wired only for manual `collector run --dry-run`; scheduled collection and persistence are planned for M3.
 
-| Layer | Choice | Rationale | Considered but rejected |
-|---|---|---|---|
-| Collector | Python 3.12 + `httpx` (async) + `selectolax` | Most sources are static HTML, so a headless browser is unnecessary. selectolax is 5–10× faster than BeautifulSoup | Scrapy (framework overhead), Playwright (resource cost — used selectively only for JS-rendered sources) |
-| Scheduler | APScheduler in a single container | Celery+Redis is over-engineered for 3–10 sources. Keep the interface swappable | Celery Beat (broker ops burden), GitHub Actions cron (no sub-5-minute cadence, awkward state) |
-| Database | PostgreSQL 16 + `pg_trgm` + `unaccent` | Fuzzy string matching handled in-database; JSONB preserves source-specific fields | MongoDB (poor fit for relational merge logic), SQLite (concurrent write limits) |
-| API | FastAPI + Pydantic v2 + SQLAlchemy 2.0 | Existing competence; auto-generated OpenAPI feeds directly into iOS client generation | Django REST (heavy), Litestar (ecosystem) |
-| Web | Next.js 16 (App Router) + Tailwind, PWA | SSR for SEO (organic search for "<artist> vinyl release") | SvelteKit, pure SPA (loses SEO) |
-| iOS | SwiftUI + `URLSession` + Swift Concurrency | See §8. Native recommended | WKWebView wrapper (App Store 4.2 risk) |
-| Deployment | Docker Compose on EC2 (t4g.small, ARM) | Reuses existing experience; ~$10/month | Kubernetes (over-engineered), Vercel+Supabase (unsuitable for a long-running collector process) |
-| CI/CD | GitHub Actions → GHCR → SSH deploy | Reuses existing experience | ArgoCD |
-| Observability | structlog (JSON) + Prometheus + Sentry | Detecting silent parser failure is a core requirement | ELK (ops burden) |
+### 2.2 Current Stack and Deferred Work
+
+| Layer | Implemented | Deferred / absent |
+|---|---|---|
+| Python | Python ≥3.12, pip editable, Pydantic v2, SQLAlchemy 2 async | No separate package workspace tool |
+| API | FastAPI ≥0.121, admin key, public reads and anonymous push subscriptions | JWT, accounts and search APIs |
+| Database | PostgreSQL 16, pg_trgm/unaccent, Alembic | Search/resolution services using these extensions |
+| Scheduler/push | APScheduler every 60 seconds, DB deliveries, pywebpush via asyncio.to_thread | Broker, daily digest and APNs |
+| Collection components | httpx async, selectolax, urllib.robotparser, three adapters | Scheduled persistence, normalization and resolution |
+| Web | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI app and generated clients |
+| Runtime | Docker Compose, Mac mini/colima with Funnel for public testing | EC2/GHCR/SSH deployment |
+| Monitoring/automation | structlog, /healthz, local tests and backup scripts | Prometheus, Sentry, external failure alerts and GitHub Actions |
 
 ---
 
 ## 3. Collection Layer
 
-### 3.1 Adapter Interface
+### 3.1 Implemented Adapter Interface
 
-Every source implements this protocol. **Adding a new source must require no code changes outside its own adapter file.**
+`packages/core/src/vinyl_core/adapters/base.py` defines the contract. `@register` and module discovery
+handle registration without registry edits. A new source still needs fixtures, tests, survey notes and seed data.
 
 ```python
-# packages/core/src/vinyl_core/adapters/base.py
-from typing import Protocol, AsyncIterator
-from datetime import datetime
-from decimal import Decimal
-from enum import StrEnum
-from pydantic import BaseModel, HttpUrl
+from collections.abc import AsyncIterator
+from typing import Protocol
+from vinyl_core.adapters.base import RawItem
 
-
-class StockStatus(StrEnum):
-    IN_STOCK = "IN_STOCK"
-    SOLD_OUT = "SOLD_OUT"
-    PREORDER = "PREORDER"
-    COMING_SOON = "COMING_SOON"   # announced, not yet purchasable
-    UNKNOWN = "UNKNOWN"
-
-
-class RawItem(BaseModel):
-    """Raw item returned by an adapter. Preserves pre-normalization state verbatim."""
-    source_id: str                 # e.g. "gimbab"
-    source_item_id: str            # source-internal product ID (extracted from URL)
-    url: HttpUrl
-    title_raw: str                 # exactly as displayed. Never pre-process here
-    artist_raw: str | None
-    label_raw: str | None
-    price_krw: Decimal | None
-    stock_status: StockStatus
-    format_raw: str | None         # e.g. "2LP", "LP+CD", "7\""
-    release_date_raw: str | None   # e.g. "2026.09.12"
-    thumbnail_url: HttpUrl | None  # stored as URL only, never rehosted
-    extra: dict                    # source-specific fields (persisted as JSONB)
-    fetched_at: datetime
-
+class PageFetcher(Protocol):
+    async def fetch_text(self, url: str) -> str | None: ...
 
 class SourceAdapter(Protocol):
     source_id: str
     display_name: str
     base_url: str
-    crawl_interval_seconds: int    # minimum 300
+    crawl_interval_seconds: int
     requires_javascript: bool
 
-    async def discover(self) -> AsyncIterator[str]:
-        """Yield **page** URLs to collect (listing or detail — see ADR-0004)."""
-        ...
-
-    async def parse_page(self, url: str, html: str) -> list[RawItem]:
-        """Extract every RawItem on the page.
-        Many for a listing page, one for a detail page, empty on failure.
-        Always log failures — never swallow exceptions."""
-        ...
+    def discover(self) -> AsyncIterator[str]: ...
+    async def parse_page(self, url: str, html: str) -> list[RawItem]: ...
 ```
 
+Required RawItem fields are source_id, source_item_id, url, title_raw and stock_status.
+Optional metadata defaults to None, extra to a new dict, and fetched_at to current UTC. Won prices reject
+negative/fractional values; fetched_at requires a timezone. Parse failures return an empty list and log the failure.
+`vinyl_collector.bridge.FetcherPageAdapter` supplies PageFetcher without importing collector into core.
+
 ### 3.2 Source Survey and Implementation Notes
+
+Adapters for gimbab, secondtrack and poclanos all exist today. M0/M1 priorities below describe the original survey order, not current product milestone status.
 
 > **Caution**: Site DOM structures change. The table below is a starting guide only. Agents must save real HTML into `tests/fixtures/<source_id>/` and confirm selectors against it before finalizing.
 
@@ -225,7 +170,11 @@ class SourceAdapter(Protocol):
 6. Check for structured data (JSON-LD `Product`, OpenGraph) — **prefer it over HTML selectors** when present, as it is far more change-resistant
 7. Save ≥ 3 HTML fixtures (one each for in-stock, sold-out, preorder)
 
-### 3.3 Pipeline Flow
+### 3.3 Collection Pipeline Plan (M3, Not Implemented)
+
+The current CLI only runs discover → Fetcher → parse_page → output. It does not persist rows, update last_seen_at or skip unchanged hashes.
+Fetcher computes body hashes and keeps ETag/Last-Modified in memory, without persistence. The diagram below is future wiring;
+account matching and APNs are also inactive. Email is not a planned channel (ADR-0006).
 
 ```
 [Scheduler] per-source cron trigger
@@ -244,7 +193,7 @@ class SourceAdapter(Protocol):
      ↓
 [EventDetector] diff against previous listing state → listing_events
      ↓
-[NotificationDispatcher] match watchlists → enqueue APNs / email
+[NotificationDispatcher] match watchlists → enqueue configured push channels (future)
 ```
 
 ### 3.4 Crawling Ethics and Legal Compliance (Mandatory)
@@ -263,6 +212,12 @@ Agents must encode these rules without exception.
 | Backoff and disable | On 429/403, exponential backoff, then auto-disable that source and alert the operator |
 | Notify in advance | Before public launch, email each source operator explaining the project and asking about partnership or an official feed |
 
+**Policy versus enforcement:** the table states required policy, not completed automation. Repeated 403/429 responses
+currently cause Fetcher to back off and raise SourceBlockedError; the CLI stops. Persistent source deactivation and
+operator alerts remain M3 work. Failed robots retrieval denies access, except 404 means no robots file. Longest-match
+and wildcard gaps in urllib.robotparser are documented in ADR-0003 and two xfail tests. Never send external outreach
+without user authorization. Legal/site descriptions below are original research context, not a fresh verification of current law or sites.
+
 > **Legal context**: In Korea the relevant considerations include database producers' rights under the Copyright Act (Arts. 91–98), unauthorized use of another's output under the Unfair Competition Prevention Act (Art. 2(1)(ch)), and each site's Terms of Service. A design that harvests **small volumes of factual metadata, links back to the source, and complements rather than substitutes for the original** is generally lower-risk — but this is not legal advice. If you intend to operate publicly or monetize, obtain professional review. For a personal learning or portfolio project, **private operation plus prior consent from source operators** is the safest path.
 
 ---
@@ -278,6 +233,9 @@ Agents must encode these rules without exception.
 > Example: the limited color pressing of Silica Gel's *Machine Boy* exists as a `listing` at both Gimbab Records and Secondtrack, merged into one `release`. The black pressing and the clear pressing are **different `release` rows**.
 
 ### 4.2 Schema (PostgreSQL DDL)
+
+This DDL summarizes current models for reading. Apply changes through Alembic revisions in `migrations/versions/`.
+Existing tables do not imply implemented accounts, crawl persistence or resolution. ORM onupdate behavior is not a DDL trigger.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -484,6 +442,8 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 
 ### 4.3 Normalization Rules (`normalize()`)
 
+> This is planned normalization work. Manual input currently uses only admin.normalize_name (NFKC, casefold and whitespace collapse); aliases and format parsing are absent.
+
 Normalization determines merge accuracy. It must be **deterministic** and fully covered by unit tests.
 
 ```
@@ -512,6 +472,8 @@ Normalization determines merge accuracy. It must be **deterministic** and fully 
 | `Box`, `박스세트` | `BOXSET` |
 
 ### 4.4 Entity Resolution
+
+> EntityResolver and the merge-review CLI are absent. The following rules are deferred design, not running policy.
 
 Apply stages in confidence order; **stop at the first match**.
 
@@ -542,7 +504,8 @@ Compare the incoming `RawItem` against the stored `listings` state.
 | `price_krw` rises ≥ 5% | `PRICE_RISE` |
 | URL 404 / absent on 3 consecutive crawls | `DELISTED` |
 
-`PREORDER_OPEN` is the **highest notification tier** and dispatches immediately. Others batch according to user preference (immediate or daily digest).
+A priority queue and daily digest are not implemented. Current M2 handles all notifiable events in the same
+60-second tick, processing PENDING before FAILED retries, then creation time/ID ascending, at most 500 per dispatch.
 
 > That table is the **diff rule set for harvesting (M3)**. Today (M2) the operator enters
 > times directly, so no diff engine is needed and only the time-driven rules below run.
@@ -563,6 +526,9 @@ Idempotency is decided by **event existence**, never by mutable state such as
 `is_published` — otherwise unpublish/republish sends the same notification twice.
 
 #### 4.5.2 A schedule change supersedes the events it produced (T-119)
+
+Editing while unpublished also supersedes old schedule events. Authorized deletion of the release itself
+is the exception: its events and deliveries are removed (§5.2-1).
 
 If a preorder moves from 17:00 to 19:00, the `PREORDER_OPENS_SOON` and `PREORDER_OPEN`
 produced by the old time **lose their meaning**. Leaving them breaks two things at once.
@@ -586,102 +552,110 @@ sent something is not revocable.
 time moved would resend the same alert for no reason. `SCHEDULE_ADDED` is never superseded —
 the schedule was still added, whatever its times became.
 
-#### 4.5.3 The feed carries one event per release (T-118)
+#### 4.5.3 Web Feed, RSS and Device Notifications
 
-When `SCHEDULE_ADDED → PREORDER_OPENS_SOON → PREORDER_OPEN` accumulate on one album, the
-top three rows of the feed are the same album. Only the last one is useful.
-
-`/v1/feed` and `/v1/feed.rss` share **one query** (`vinyl_api/feed_query.py`). Holding
-separate copies means one gets fixed and the other silently drifts. Push notifications
-collapse the same way via `tag=release-<id>`, so all three surfaces follow one rule.
+- `/v1/feed` returns one row per published release, including releases without events. SQL sorting precedes the limit.
+  Default `sort=imminent` uses preorder opening, or release date at KST midnight: future starts first,
+  most recent past starts next, unknown last. `sort=recent` uses descending `updated_at`, labeled **최근 변경순**.
+- The web shows preorder opening or release date on the right. API `FeedItem.at` is an event/schedule timestamp,
+  not the web display source. Status is calculated at render time from the schedule window or release date.
+- RSS selects at most 50 latest non-superseded events, one per published release, using `latest_event_per_release()`.
+  `/v1/feed` shares this event helper, but has its own release selection and sorting query.
+- Push tags are `release-<id>-<event_type>`: different event types remain separate notifications;
+  the same type emitted after rescheduling replaces its previous notification.
 
 ---
 
 ## 5. API Design
 
-### 5.1 Conventions
+### 5.1 Current Contract
 
-- Base path: `/v1`
-- Auth: `Authorization: Bearer <JWT>` (required only for watchlist and device endpoints)
-- Pagination: **cursor-based** (`?cursor=<opaque>&limit=20`, max 100)
-- Responses: `snake_case` JSON; timestamps in ISO-8601 UTC (`2026-08-20T04:00:00Z`)
-- Errors: RFC 9457 Problem Details
-- Caching: list responses carry `ETag` and `Cache-Control: public, max-age=60`
+- Tables below reflect actual routers. Exact schemas are in [openapi.json](api/openapi.json), generated by `make openapi`.
+- Public reads and Web Push subscriptions require no account. Admin JSON APIs require `X-Admin-Key`.
+  `/admin` HTML serves the login interface and is excluded from OpenAPI.
+- Only `/v1/releases` has cursor pagination (`limit` defaults to 20, range 1–100).
+  It sorts by preorder opening ascending, NULL last, then ID ascending; past schedules are not automatically excluded.
+- `/v1/releases` and `/v1/feed` return ETags and 60-second cache headers. RSS uses 300 seconds and ICS 600.
+  Web API fetches and same-origin proxy responses use `no-store`.
+- JSON is snake_case, timestamps are timezone-aware UTC, and won prices are integers. API errors use RFC 9457
+  Problem Details; proxy-generated errors can instead be `{detail: ...}` JSON.
 
-### 5.2 Endpoints
+### 5.2 Implemented Public Endpoints
 
-| Method | Path | Description |
+| Method | Path | Current behavior |
 |---|---|---|
-| `GET` | `/v1/feed` | Unified timeline, event-driven, newest first |
-| `GET` | `/v1/releases` | Release list. Filters: `from`, `to`, `format`, `source`, `is_limited`, `stock_status`, `label`, `artist_id` |
-| `GET` | `/v1/releases/{id}` | Detail plus the array of `listings` (price/stock comparison across sellers) |
-| `GET` | `/v1/search?q=` | Unified search over artist, title, label (trigram) |
-| `GET` | `/v1/artists/{id}` | Artist detail and releases |
-| `GET` | `/v1/events` | Event stream, `?since=`, `?type=` |
-| `GET` | `/v1/sources` | Source list with last crawl time and health |
-| `POST` | `/v1/watchlist` | Add watchlist item |
-| `GET` | `/v1/watchlist` | List watchlist |
-| `DELETE` | `/v1/watchlist/{id}` | Remove watchlist item |
-| `GET` | `/v1/push/public-key` | VAPID public key (needed to subscribe; no auth) |
-| `POST` | `/v1/push/subscribe` | Register a Web Push subscription (no auth) |
-| `DELETE` | `/v1/push/subscribe` | Unsubscribe |
-| `POST` | `/v1/devices` | Register / refresh APNs token |
-| `POST` | `/v1/auth/apple` | Sign in with Apple token exchange |
-| `GET` | `/v1/feed.rss` | RSS 2.0 feed (unauthenticated; distribution channel) |
-| `GET` | `/v1/releases.ics` | Release-date calendar (iCalendar) |
-| `GET` | `/healthz` | Health check including DB connectivity |
-| `GET` | `/metrics` | Prometheus metrics |
+| GET | `/v1/feed` | One row per published release; `sort=imminent|recent`, limit defaults to 50, maximum 100, no cursor |
+| GET | `/v1/releases` | Published list; `cursor`, `limit`, `from`, `to`, `format`, `is_limited`; date filters use release date |
+| GET | `/v1/releases/{release_id}` | Published detail with purchase `links` and string `artist_name`; no listings or recent_events |
+| GET | `/v1/feed.rss` | Latest-event RSS 2.0 |
+| GET | `/v1/releases.ics` | 30-minute preorder blocks with alarms 30 minutes before; include_release_dates defaults to true for all-day release events |
+| GET | `/v1/push/public-key` | VAPID public key and enabled flag |
+| POST | `/v1/push/subscribe` | Anonymous creation/update; capacity also checked on reactivation |
+| DELETE | `/v1/push/subscribe` | Deactivate the endpoint subscription and retain history |
+| GET | `/healthz` | Checks DB connectivity: 200 on success, 503 on DB failure |
 
-### 5.2-1 Operator API (manual curation, [ADR-0005](adr/0005-manual-curation-first.md))
+FastAPI also provides `/docs`, `/redoc` and `/openapi.json` on the API port. Search, artist detail,
+event streams, source lists, watchlists, accounts, APNs device registration and `/metrics` are **not implemented**.
+Funnel does not expose every API path: push is proxied through `/api/push/*`, and RSS/ICS through their fixed `/v1/*` paths.
 
-Auth is a single `X-Admin-Key: <ADMIN_API_KEY>` header. **No account system** — building OAuth
-for a single operator would be over-engineering.
+### 5.2-1 Operator API
 
-| Method | Path | Description |
+| Method | Path | Current behavior |
 |---|---|---|
-| `POST` | `/admin/releases` | Create a schedule (draft, `is_published=false`) |
-| `PATCH` | `/admin/releases/{id}` | Edit |
-| `POST` | `/admin/releases/{id}/publish` | Publish — emits `SCHEDULE_ADDED` |
-| `DELETE` | `/admin/releases/{id}` | Only unpublished drafts may be deleted |
-| `POST` | `/admin/releases/{id}/links` | Add a purchase link |
-| `GET` | `/admin/releases` | List including drafts |
+| GET | `/admin` | Login/create/edit UI; content stays hidden until key validation |
+| GET | `/admin/releases` | Full list including drafts |
+| GET | `/admin/releases/{release_id}` | Detail including drafts, notes and can_delete |
+| POST | `/admin/releases` | Create a draft with purchase links |
+| PATCH | `/admin/releases/{release_id}` | Update supplied fields; omitted links are preserved, arrays replace the list atomically with the schedule |
+| POST | `/admin/releases/{release_id}/publish` | Publish and create the first SCHEDULE_ADDED |
+| POST | `/admin/releases/{release_id}/unpublish` | Unpublish while retaining event history |
+| DELETE | `/admin/releases/{release_id}` | Delete an unpublished release, even if previously published; linked listings block deletion; events/deliveries are removed |
+| POST | `/admin/releases/{release_id}/links` | Add a purchase link |
+| DELETE | `/admin/releases/{release_id}/links/{link_id}` | Delete this release's purchase link |
 
-**Public endpoints expose only `is_published=true`.** Leaking drafts would leak unannounced releases.
+`can_delete` is true for unpublished releases without linked listings; other FK references may still cause a 409.
+Public output excludes notes and returns 404 for unpublished details. Inputs reject blank/null titles,
+null is_limited, naive timestamps, invalid preorder windows/URLs and invalid won prices.
 
-### 5.3 Example Response
+### 5.2-2 Runtime guarantees (2026-09-10 review)
 
-```jsonc
-// GET /v1/releases/1042
+- Event backfill is limited to seven days; delivery eligibility to 48 hours after the event. Preorder-soon events are generated only within 24 hours before opening.
+- Deliveries target active WEB subscriptions, excluding events before subscription creation. Reactivation resets that subscription start time.
+
+- Admin PATCH preserves links when `links` is omitted and replaces the full link list when an array is supplied. Schedule and links share one transaction; commit failures cannot return success.
+- Failed pushes receive at most three attempts, with retries eligible one and five minutes after delivery creation. Every attempt rechecks publication, subscription activity, supersession and the 48-hour delivery horizon. A database lock prevents overlapping scheduler processes.
+- Editing an unpublished schedule also supersedes events for its previous times, allowing new events after republication.
+- Release dates begin at KST midnight. Preorder calendar blocks remain 30 minutes across date boundaries; the web calendar reads all API pages.
+- RSS and iCalendar are exposed on the public web domain at `/v1/feed.rss` and `/v1/releases.ics`. Subscription addresses use runtime `PUBLIC_WEB_URL`.
+- A process crash between external push acceptance and database commit can still duplicate a transmission. `SENT` means push-service acceptance, not confirmation of device display.
+
+### 5.3 Public Detail Response Example
+
+This illustrates the current `ReleaseOut` shape; it does not refer to a real database row.
+
+```json
 {
   "id": 1042,
   "title": "Machine Boy",
-  "artist": { "id": 88, "name_display": "실리카겔", "name_en": "Silica Gel" },
+  "artist_name": "실리카겔",
   "label": "Magic Strawberry Sound",
-  "catalog_no": "MSS-0142",
-  "barcode": "8809876543210",
   "format": "2LP",
   "variant": "Clear Vinyl",
   "is_limited": true,
   "release_date": "2026-09-12",
-  "cover_url": "https://…",          // original URL, not proxied
-  "listings": [
+  "preorder_opens_at": "2026-09-11T04:00:00Z",
+  "preorder_closes_at": "2026-09-13T09:00:00Z",
+  "cover_url": null,
+  "curation": "MANUAL",
+  "is_published": true,
+  "links": [
     {
-      "source": { "id": "gimbab", "display_name": "Gimbab Records" },
-      "url": "https://…",
-      "price_krw": 58000,
-      "stock_status": "PREORDER",
-      "last_seen_at": "2026-08-20T03:58:12Z"
-    },
-    {
-      "source": { "id": "secondtrack", "display_name": "Secondtrack" },
-      "url": "https://…",
-      "price_krw": 56000,
-      "stock_status": "SOLD_OUT",
-      "last_seen_at": "2026-08-20T03:59:04Z"
+      "id": 1,
+      "source_id": "gimbab",
+      "shop_name": "김밥레코즈",
+      "url": "https://example.com/release/1042",
+      "price_krw": 58000
     }
-  ],
-  "recent_events": [
-    { "event_type": "PREORDER_OPEN", "occurred_at": "2026-08-19T02:00:11Z", "source_id": "gimbab" }
   ]
 }
 ```
@@ -690,141 +664,98 @@ for a single operator would be over-engineering.
 
 ## 6. Repository Layout
 
+These are the principal existing paths. Braces abbreviate multiple files in the same directory.
+
+```text
+AGENTS.md / CLAUDE.md / README.md
+compose.yaml / compose.prod.yaml / Makefile / .env.example
+.vscode/{settings,extensions}.json
+apps/
+  api/
+    src/vinyl_api/
+      main.py / deps.py
+      routers/{admin,admin_ui,releases,feed,rss,calendar,push}.py
+      schemas/{release,push}.py
+      feed_query.py / serializers.py / pagination.py / caching.py
+      problems.py / request_limits.py / rate_limit.py / rss.py / icalendar.py
+    tests/                         # integration_runtime.py + test_*.py
+    pyproject.toml / Dockerfile
+  collector/
+    src/vinyl_collector/
+      cli.py / scheduler.py / push_sender.py / slack_alerter.py / fetcher.py / bridge.py
+    tests/fixtures/<source_id>/*.html
+    pyproject.toml / Dockerfile
+  web/
+    app/
+      page.tsx / calendar/page.tsx / releases/[id]/page.tsx
+      subscribe/{page,PushToggle}.tsx / layout.tsx / globals.css / manifest.ts
+      api/push/{public-key,subscribe}/route.ts
+      v1/{feed.rss,releases.ics}/route.ts
+    lib/{api,proxy,push,push-request,feed-display,calendar,format}.ts
+    public/sw.js / public/*.png
+    tests/*.test.mjs
+    package.json / package-lock.json / next.config.ts / Dockerfile
+packages/core/
+  src/vinyl_core/
+    models/{base,artist,release,listing,source,user}.py
+    adapters/{base,registry,gimbab,secondtrack,poclanos}.py
+    db.py / settings.py / seed.py / enums.py / logging.py / testing.py
+    schedule_events.py / notifications.py / alerts.py
+  tests/ / pyproject.toml
+migrations/versions/ / alembic.ini
+infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
+docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
+docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
+backups/                           # ignored runtime artifacts
+venv/                              # ignored local Python environment
 ```
-vinyl-radar/
-├─ CLAUDE.md                        # persistent agent context (§0 summary + conventions)
-├─ README.md
-├─ compose.yaml                     # local dev stack
-├─ compose.prod.yaml
-├─ Makefile                         # make up / test / lint / migrate / seed
-├─ .env.example
-├─ .vscode/
-│  ├─ settings.json
-│  ├─ launch.json
-│  ├─ tasks.json
-│  └─ extensions.json
-├─ .devcontainer/
-│  └─ devcontainer.json
-├─ apps/
-│  ├─ api/                          # FastAPI
-│  │  ├─ src/vinyl_api/
-│  │  │  ├─ main.py
-│  │  │  ├─ deps.py
-│  │  │  ├─ routers/{feed,releases,calendar,rss,push,admin,admin_ui}.py
-│  │  │  ├─ feed_query.py           # newest event per release — shared by feed and rss
-│  │  │  ├─ icalendar.py            # RFC 5545 generation (hand-written)
-│  │  │  ├─ rss.py                  # RSS 2.0 + RFC 822 generation (hand-written)
-│  │  │  ├─ problems.py             # RFC 9457 error responses
-│  │  │  ├─ pagination.py           # keyset cursor
-│  │  │  ├─ caching.py              # ETag / Cache-Control
-│  │  │  ├─ serializers.py
-│  │  │  ├─ schemas/
-│  │  │  └─ services/
-│  │  ├─ tests/
-│  │  ├─ pyproject.toml
-│  │  └─ Dockerfile
-│  ├─ collector/                    # scrapers + scheduler
-│  │  ├─ src/vinyl_collector/
-│  │  │  ├─ scheduler.py
-│  │  │  ├─ fetcher.py              # httpx, rate limit, robots, conditional requests
-│  │  │  ├─ pipeline.py
-│  │  │  └─ cli.py                  # `collector run --source gimbab --dry-run`
-│  │  ├─ tests/
-│  │  │  └─ fixtures/<source_id>/*.html
-│  │  ├─ pyproject.toml
-│  │  └─ Dockerfile
-│  ├─ web/                          # Next.js 16 (PWA)
-│  │  ├─ app/
-│  │  │  ├─ page.tsx                # feed
-│  │  │  ├─ manifest.ts             # web app manifest (home-screen install = iOS push prerequisite)
-│  │  │  ├─ api/push/               # same-origin proxy (ADR-0007)
-│  │  │  ├─ subscribe/PushToggle.tsx  # push on/off (client component)
-│  │  │  ├─ releases/[id]/page.tsx
-│  │  │  ├─ search/page.tsx
-│  │  │  └─ artists/[id]/page.tsx
-│  │  ├─ public/
-│  │  │  ├─ sw.js                   # service worker — push receipt, notification click
-│  │  │  └─ icon-*.png              # PWA icons (192/512/maskable/apple-touch)
-│  │  ├─ lib/api.ts                 # generated OpenAPI client (server components only)
-│  │  ├─ lib/push.ts                # browser subscription
-│  │  ├─ lib/proxy.ts               # API forwarding
-│  │  ├─ components/
-│  │  └─ Dockerfile
-│  └─ ios/                          # Xcode project
-│     └─ VinylRadar/
-│        ├─ VinylRadarApp.swift
-│        ├─ Features/{Feed,Search,ReleaseDetail,Watchlist,Settings}/
-│        ├─ Core/{APIClient,Models,DesignSystem}/
-│        └─ Notifications/
-├─ packages/
-│  └─ core/                         # shared Python package for api + collector
-│     ├─ src/vinyl_core/
-│     │  ├─ adapters/
-│     │  │  ├─ base.py
-│     │  │  ├─ gimbab.py
-│     │  │  ├─ secondtrack.py
-│     │  │  ├─ poclanos.py
-│     │  │  └─ registry.py          # adapter auto-registration
-│     │  ├─ models/                 # SQLAlchemy ORM
-│     │  ├─ normalize.py
-│     │  ├─ resolver.py
-│     │  ├─ events.py
-│     │  ├─ testing.py                # edge-case catalog shared by all output surfaces
-│     │  └─ aliases.yaml            # artist alias dictionary
-│     ├─ tests/
-│     └─ pyproject.toml
-├─ migrations/                      # Alembic
-├─ backups/                        # pg_dump output (never committed)
-├─ infra/
-│  ├─ nginx/
-│  ├─ prometheus/
-│  └─ deploy.sh
-├─ docs/
-│  ├─ BLUEPRINT.ko.md
-│  ├─ BLUEPRINT.en.md               # this document
-│  ├─ adapters/<source_id>.md       # per-source survey record
-│  ├─ adr/NNNN-*.md
-│  └─ api/openapi.json              # generated in CI
-└─ .github/workflows/
-   ├─ ci.yml
-   ├─ deploy.yml
-   └─ parser-canary.yml             # once-daily live parser verification
-```
+
+**Reserved future paths:** `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector `pipeline.py`,
+core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
+`infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh`, `.github/workflows/` and `.devcontainer/` do not exist.
+These are reserved for future tasks; their listing does not authorize creating or activating them.
 
 ---
 
 ## 7. Web Frontend
 
-### 7.1 Screens
+### 7.1 Implemented Screens
 
-| Screen | Route | Key elements |
+| Screen | Path | Current content |
 |---|---|---|
-| Feed | `/` | Event timeline; `PREORDER_OPEN` badge emphasized; source filter chips |
-| Calendar | `/calendar` | Monthly grid keyed on release date |
-| Detail | `/releases/[id]` | Cover, metadata, per-seller price table, out-link buttons |
-| Search | `/search` | Incremental search with artist/label/format facets |
-| Artist | `/artists/[id]` | Discography plus watch button |
-| Watchlist | `/watchlist` | Requires login |
+| Feed | `/` | One row per published release, recent-change/imminent sorting, schedule status/start time and purchase links |
+| Calendar | `/calendar?month=YYYY-MM` | Preorder openings and release dates in KST; follows all API pages |
+| Detail | `/releases/[id]` | Title, artist, format, preorder window, release date and purchase links |
+| Subscribe | `/subscribe` | Web Push toggle and public RSS/ICS addresses |
 
-### 7.2 Design Direction
+Search, artist and watchlist screens are absent. The API accepts cover_url, but the current web does not render cover images.
 
-- **Information density first.** Collectors scan many items per screen; do not over-pad cards.
-- **Visual priority of state**: `Preorder open` > `Restock` > `New` > `Price change`. Use **label + icon combinations rather than color alone**, for color-vision accessibility.
-- Dark mode by default. Cover art is the focal point, so keep backgrounds neutral.
-- Allow source domains via `next/image` `remotePatterns`, but **do not store images locally.**
+### 7.2 Display and PWA
 
-### 7.3 Generated API Client
+- Status uses text badges. Layout keeps information density and supports system dark mode.
+- Feed, calendar, detail and subscribe pages render dynamically. Feed status is calculated on render; there is no automatic live-refresh timer.
+- `manifest.ts`, PWA icons and `sw.js` exist. The worker activates on install and handles push, clicks and subscription replacement; it has no offline content cache.
+- The iPhone test flow uses Safari's Add to Home Screen, launches that app and grants permission. Verify actual reception/display on a physical device.
 
-Generate types from the FastAPI-produced `openapi.json`. Hand-written types are prohibited.
+### 7.3 API Client and Environment
 
-```bash
-# apps/web
-npx openapi-typescript ../../docs/api/openapi.json -o lib/api-types.ts
-```
+`apps/web/lib/api.ts` contains server-side fetch helpers and **handwritten TypeScript types**.
+There is no generated client, api-types.ts or openapi-typescript dependency. Generation remains future work;
+`make openapi` currently generates only the API contract snapshot.
+
+- `API_BASE_URL` is the web server's internal API address (`http://api:8000` in Compose).
+- `PUBLIC_WEB_URL` is the browser-accessible public web address used for links by api, collector and web.
+  `/subscribe` reads it at runtime. `PUBLIC_API_URL` is unused.
+- Browsers and service workers use same-origin push routes. The API has no CORS middleware.
+- API requests have 10-second timeouts and no-store; public RSS and ICS use fixed-path proxies.
 
 ---
 
-## 8. iOS Application
+## 8. Native iOS Application (Planned for M5+)
+
+> This is an unimplemented native-app design. apps/ios, Swift models, APNs, JWT and SwiftData are absent.
+> Current iPhone notifications use PWA Web Push; a native app and Apple login are not prerequisites for the current service.
+> Platform/review comparisons below are historical planning context and must be checked again before native work starts.
 
 ### 8.1 Implementation Approach — Analysis and Recommendation
 
@@ -837,7 +768,7 @@ npx openapi-typescript ../../docs/api/openapi.json -o lib/api-types.ts
 **Recommendation**: adopt **Option B (native SwiftUI)**, for three reasons.
 
 1. The stated goal is a **"more user-friendly"** iOS app. A web-view wrapper cannot, by definition, be friendlier than the web.
-2. The core value of this service is **push notification** the instant a preorder opens. That requires native integration.
+2. The core value of this service is **push notification** the instant a preorder opens. Current delivery uses Web Push; native integration is a future choice for app-specific features.
 3. Because the design is API-first, web and iOS share the same contract — the web work is not wasted. "Build the web and leverage it" is realized through **shared API and domain model, not shared UI code.**
 
 The counter-argument is stated fairly: if shipping something to iOS quickly matters more (learning or portfolio velocity), launching with Option A and converting screen-by-screen is defensible. In that case, implement at minimum the **push notifications, settings screen, and tab bar natively** to reduce 4.2 exposure.
@@ -908,114 +839,117 @@ VSCode can be the primary IDE, but the iOS portion carries hard constraints.
 
 ## 9. Development Environment and Operations
 
-### 9.1 Quick Start
+### 9.1 Current Execution
+
+A Docker engine and Compose are required. The macOS test setup uses colima.
 
 ```bash
-git clone <repo> && cd vinyl-radar
-cp .env.example .env
-
-make up          # start postgres + api + collector + web
-make migrate     # apply Alembic migrations
-make seed        # seed sources table + load artist aliases
-
-# manual single-source run (parse only, no DB writes)
-docker compose exec collector collector run --source gimbab --dry-run --limit 5
-
-# API docs: http://localhost:8000/docs
-# Web:      http://localhost:3000
+# New environments only; never overwrite an existing .env.
+cp -n .env.example .env
+# Configure ADMIN_API_KEY; public testing requires a secret of at least 32 characters.
+make up          # development web, API, collector and PostgreSQL
+make migrate     # initial setup or new migrations
+make seed        # sources only; aliases are not implemented
 ```
 
-### 9.2 Recommended VSCode Extensions
+`make prod` builds/starts with compose.yaml plus compose.prod.yaml. It is used for public testing
+on the Mac mini and is not an EC2 deployment command.
 
-```jsonc
-{
-  "recommendations": [
-    "ms-python.python",
-    "charliermarsh.ruff",
-    "ms-python.mypy-type-checker",
-    "ms-azuretools.vscode-docker",
-    "ms-vscode-remote.remote-containers",
-    "bradlc.vscode-tailwindcss",
-    "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
-    "humao.rest-client",
-    "mtxr.sqltools",
-    "sswg.swift-lang",
-    "yzhang.markdown-all-in-one"
-  ]
-}
-```
-
-### 9.3 Test Strategy
-
-| Layer | Method | Tooling |
+| Component | Development: make up | Public test: make prod |
 |---|---|---|
-| Adapter parsing | Golden tests against **stored HTML fixtures**. No network access | pytest + local fixtures |
-| Normalization | Table-driven unit tests (≥ 30 input/expected pairs) | `pytest.mark.parametrize` |
-| Resolution | Precision/recall measured on 100 labeled pairs. **CI fails on regression** | pytest + metric thresholds |
-| API | Integration tests against a real PostgreSQL container | pytest + testcontainers |
-| Parser canary | **One live request per day per source**, verifying required fields exist. Auto-files a GitHub Issue on failure | separate workflow |
+| Web | next dev with source mounts | Built image with next start; web mounts removed |
+| API | Source mounts and uvicorn --reload | Same mounts/reload; ENVIRONMENT=production |
+| Collector | Source mounts; scheduler; no automatic reload | Same; ENVIRONMENT=production |
+| DB/ports | postgres_data volume; loopback 5432/8000/3000 bindings | Same |
 
-The parser canary is the primary defense against the worst failure mode — a site redesign that silently yields zero items. It is not optional.
+API Python edits reload automatically. Collector Python edits require `docker compose restart collector`.
+Rebuild production web edits and dependency changes. Environment/Compose changes require container recreation
+with `make prod` or `up -d` using the same overlay; restart alone does not update environment variables.
+
+| Variable | Consumer and purpose |
+|---|---|
+| DATABASE_URL | API/collector database connection |
+| ADMIN_API_KEY | API authentication; production settings validation in API and collector |
+| API_BASE_URL | Web internal API calls; Compose sets http://api:8000 |
+| PUBLIC_WEB_URL | Public links and subscription addresses in API, collector and web |
+| VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT | API subscription availability and collector push delivery |
+| CRAWLER_* | Manual collector configuration; does not enable scheduled harvesting |
+| ENV_BACKUP_DIR / ENV_BACKUP_KEEP | Host .env backup scripts |
+
+Local mode accepts the development admin key but rejects empty keys. Staging/production reject the default
+or keys shorter than 32 characters. Incomplete VAPID settings produce enabled=false, subscription POST 503,
+and FAILED from the sender; this is not recorded as a successful no-op.
+
+### 9.2 Local Tools
+
+.vscode/settings.json selects venv/bin/python and Python test directories. Recommended extensions live in
+.vscode/extensions.json. There are no launch.json, tasks.json or devcontainer files. Use `make install` for
+Python and `npm ci` in apps/web for web dependencies.
+
+### 9.3 Implemented Verification
+
+```bash
+make lint
+make test
+make openapi
+cd apps/web
+npm run lint
+node --test tests/*.test.mjs
+npm run build
+```
+
+Default Python tests use fixtures, mocks, TestClient and SQL query checks; no testcontainers setup starts a DB.
+apps/api/tests/integration_runtime.py is an **explicitly invoked** PostgreSQL check. It uses a fake sender,
+creates an isolated schema and rolls everything back. It is excluded from make test and sends no real pushes.
+`collector test-push` does send real notifications and requires user authorization.
+
+CI, parser canaries and coverage gates are absent. Test counts in docs/runtime-review.md are dated 2026-09-10
+results, not a substitute for a fresh run. Documentation work must not start services or test deletion on existing records.
 
 ### 9.3-1 Backup and Restore
 
-**A volume only protects against accidental deletion; it does not prevent data loss.**
-Disk failure, instance termination, a bad migration, or a stray `DROP TABLE` all defeat it.
+- `make backup` pipes pg_dump through gzip into backups/. It detects pipeline failure and removes failed artifacts.
+- `make restore FILE=...` prompts first, then applies successfully decompressed SQL with psql in one transaction,
+  stopping on SQL errors. It overwrites current data and requires authorization and a prior backup. Test restores in a separate DB.
+- `make backup-prune` retains 30 DB backups. infra/vinyl-radar-backup.sh runs backup, prune and .env backup
+  when the DB is running; it skips when DB is stopped and logs a warning if .env backup fails.
+- infra/env-backup.sh encrypts .env and infra/env-restore.sh restores it. ENV_BACKUP_DIR defaults to
+  **local project storage**, backups/env; off-disk storage must be configured separately. Default retention is 10;
+  `make backup-env-setup` configures the Keychain password.
+- No LaunchAgent plist or registration command is stored in this repository. Verify host registration and timing separately.
+- Ordinary down preserves the volume; down -v, volume deletion, SQL deletion and disk failure do not. A volume is not a backup.
 
-```bash
-make backup                          # timestamped dump into backups/
-make restore FILE=backups/xxx.sql.gz # restore (overwrites current data)
+### 9.3-2 Funnel Public Testing
+
+```text
+Internet → Tailscale Funnel → Mac mini 127.0.0.1:3000
+                             → colima/Docker web → api:8000 → postgres:5432
 ```
 
-| Item | Detail |
-|---|---|
-| Method | `pg_dump --clean --if-exists` piped through gzip; restored with `psql` |
-| Frequency | At least daily in production (cron) |
-| Location | **Must also live off the server** (e.g. S3). A backup on the same disk dies with it |
-| Verification | An untested backup is not a backup. Rehearse restores periodically |
+The address used in this session is https://jaehyeonui-macmini.tail598a5f.ts.net. Check the actual URL and tunnel
+registration with `tailscale funnel status`. Code and DB remain on the Mac mini. Expose only web; API/admin/DB
+ports stay on loopback. Do not add an unrestricted API proxy to the web.
 
-> ⚠️ The `-v` in `docker compose down -v` **deletes volumes**. Plain `docker compose down`
-> used during deploys only removes containers and keeps the data. Do not confuse the two.
+After reboot, `colima start` followed by `make prod` starts the stack. infra/vinyl-radar-start.sh also checks
+colima, runs Compose up and polls API health, but does not build images. Docker restart policies apply only
+while the engine is running; they do not guarantee host login or daemon startup.
 
-### 9.4 Observability
+### 9.4 Observability and Limits
 
-| Item | Implementation |
-|---|---|
-| Logging | `structlog` JSON output; `source_id`, `url`, `trace_id` are required fields |
-| Metrics | `collector_items_parsed_total{source}`, `collector_parse_errors_total{source}`, `collector_run_duration_seconds{source}`, `collector_last_success_timestamp{source}` |
-| Alert conditions | ① a source's `last_success_timestamp` exceeds 3× its cron interval ② `parse_errors / items_parsed > 0.1` ③ zero `NEW_LISTING` events in 24h |
-| Error tracking | Sentry, with per-source tags on parse exceptions |
+Current signals are structlog logs, DB-aware /healthz, scheduler.tick, notifications.dispatched and
+push.retry_exhausted. There is no universal trace_id, Prometheus, Sentry or external operator-alert channel.
+Anonymous subscriptions have URL/key validation, body size/time bounds, process-local rate limits, DB capacity
+checks and same-origin validation in web ([security review](security-review.md)). API rate limits are not shared across processes.
 
-### 9.5 CI/CD
+### 9.5 CI/CD Status
 
-```yaml
-# .github/workflows/ci.yml (abridged)
-jobs:
-  quality:
-    - ruff check / ruff format --check
-    - mypy packages/core apps/api apps/collector
-    - pytest --cov (threshold 70%)
-    - regenerate openapi.json and diff against committed copy → fail on mismatch
-  web:
-    - pnpm lint / tsc --noEmit / next build
-  image:
-    - buildx linux/arm64 → push to GHCR (main branch only)
-```
+.github/workflows/ and infra/deploy.sh do not exist: no automated CI, GHCR publishing, SSH deploy or rollback.
+The current workflow is local Make/npm verification and Compose builds/startup. CI/cloud migration is separate future work.
 
-`deploy.yml` SSHes to EC2, runs `docker compose pull && up -d`, verifies `/healthz`, and rolls back to the previous tag on failure.
+### 9.6 Cost and Operational Scope
 
-### 9.6 Estimated Monthly Cost (USD)
-
-| Item | Cost |
-|---|---|
-| EC2 t4g.small (1-yr reserved) | ~$9 |
-| EBS 20 GB | ~$2 |
-| Domain | ~$1 |
-| Apple Developer Program | ~$8 (amortized $99/yr) |
-| **Total** | **~$20** |
-
-Oracle Cloud Always Free (ARM, 4 OCPU / 24 GB) can run this at $0 initially.
+The current implementation runs public tests on the owner's Mac mini. Historical EC2/Apple price tables were
+neither actual current bills nor verified estimates. Recalculate resources and prices when cloud/native work begins.
 
 ---
 
@@ -1023,11 +957,16 @@ Oracle Cloud Always Free (ARM, 4 OCPU / 24 GB) can run this at $0 initially.
 
 Each task is written to be **independently verifiable**. Agents must cite the task ID while working.
 
+> Status as of 2026-09-11: M1 paths and M2 time events/Web Push are implemented.
+> T-116 has retries and 404/410 deactivation; **external operator alerts remain open**.
+> M3+ is planned; acceptance criteria are not completion claims. T-008–T-011 rows preserve the original M0 plan.
+> T-008/T-009 are deferred/unimplemented; public API/web responsibilities were delivered as T-105/T-110. T-012 CI remains absent.
+
 ### M0 — Walking Skeleton (complete)
 
 > The original goal ("one source → DB → API → one screen") was superseded by
 > [ADR-0005](adr/0005-manual-curation-first.md). M0 closes with the harvester components built and tested.
-> T-008–T-012 move to M3 (harvesting resumed).
+> Collection pipeline work moved to M3; public API/web were delivered in M1 for manual schedules.
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
@@ -1042,7 +981,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-009 | `pipeline.py`: RawItem → listings upsert (1:1 release creation, no merging yet) | `collector run --source gimbab` populates the DB |
 | T-010 | `GET /v1/releases` with cursor pagination | Exposed in OpenAPI; returns real data |
 | T-011 | Next.js feed screen (SSR, no filters) | List renders at `localhost:3000` |
-| **M0 done when** | Gimbab Records items are harvested and visible on the web page | |
+| **M0 closed scope** | Scaffolding, schema and collection components; crawl-to-DB-to-web remains deferred | |
 
 ### M1 — Manual Curation → Public Feed ([ADR-0005](adr/0005-manual-curation-first.md))
 
@@ -1069,17 +1008,23 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 |---|---|---|
 | T-111 | APScheduler + `preorder_opens_at` watcher | Long-running container, 1-minute resolution in logs |
 | T-112 | Emit `PREORDER_OPENS_SOON` (24h) / `PREORDER_OPEN` / `RELEASED` | All three verified with clock manipulation |
-| T-113 | Delivery idempotency (never send the same event twice) | Zero duplicates after scheduler restart |
+| T-113 | Event-generation idempotency | Sequential reruns create no duplicate live event |
 | T-114 | **Web Push subscription** (VAPID keys, subscribe/unsubscribe API, schema) — [ADR-0006](adr/0006-web-push-first.md) | Browser subscribes and the row lands in the DB |
-| T-115 | Sender + **idempotent delivery** (`notification_deliveries`) | Zero duplicate sends after a scheduler restart |
-| T-116 | Retry, expired-subscription cleanup, silent-failure alerting | Deliberate failure alerts the operator; 410 deactivates the subscription |
+| T-115 | Delivery records and deduplication | Committed SENT rows are not reprocessed; see §5.2-2 for the send/commit crash gap |
+| T-116 | Retry, expired-subscription cleanup, **Slack operator alerts** | A deliberate failure reaches Slack; 410 deactivates the subscription |
 | T-117 | Web subscribe UI (PWA manifest + service worker) — [ADR-0007](adr/0007-same-origin-push-proxy.md) | Notification received on a real device |
 | T-118 | Feed collapsing (one event per release) + `SCHEDULE_CHANGED` (§4.5.1, §4.5.3) | One row per album in the feed; editing a schedule notifies |
 | T-119 | Supersede and re-fire on schedule change (§4.5.2) | Moving a preorder time re-sends the open alert **at the new time** |
+| T-120 | Always-on readiness (port binding, admin key, production build, backup automation) | Two commands restore after reboot; encrypted `.env` backup lives off-disk |
+| T-130 | Hardening for public exposure ([`docs/security-review.md`](security-review.md)) | No unauthenticated SSRF, 500, or XSS |
+| T-131 | Notification `tag` scoped per event | Distinct alerts no longer erase each other on the device |
+| T-132 | Feed `sort=recent` keyed on `updated_at` | Editing a schedule moves it to the top |
+| T-133 | Allow deleting drafts (unpublish → delete) | Removable from the UI without SQL; published rows stay protected |
+| T-134 | Admin login screen | Body stays closed until the key verifies; no re-entry afterwards |
 
 > **Web Push is the first channel** ([ADR-0006](adr/0006-web-push-first.md)). Email is not built.
 > The APNs plan in §8.3 is deferred to iOS app launch, not cancelled.
-> T-113 verified **event-creation** idempotency; **delivery** idempotency lands in T-115.
+> T-113 verified event-generation idempotency; T-115 uses delivery records and locks, with no exactly-once guarantee across send/commit failures.
 
 ### M3 — Harvesting Resumed
 
@@ -1124,7 +1069,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-038 | WatchlistView | CRUD works |
 | T-039 | SwiftData offline cache | Recent feed visible in airplane mode |
 
-### M6 — Push Notifications
+### M6 — Native APNs and Push Extensions (Separate from Current Web Push)
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
@@ -1146,13 +1091,16 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 
 ## 11. Risks and Mitigations
 
+Distinguish active measures from planned ones: parser canaries, persistent source deactivation, automatic
+recovery and external alerts are not running today. Future mitigations below are not completed safeguards.
+
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
 | Source redesign breaks parsers | High | High | Parser canary (T-018), golden fixture tests, per-source alerting |
 | Source operator requests blocking | High | Medium | Advance notice and partnership outreach (§3.4); `sources.is_enabled` allows instant shutoff |
 | Bad merges erode trust | Medium | Medium | Precision-first policy, `merge_candidates` hold queue, reversible merges |
 | Bot protection (Cloudflare etc.) | Medium | Medium | Re-evaluate the source. **Do not attempt circumvention — drop the source instead** |
-| Notification too slow, limited edition missed | High | Medium | Shorten cron to 5–10 min for preorder-heavy sources; separate priority queue |
+| Notification too slow, limited edition missed | High | Medium | Current manual schedules use a 60-second tick and bounded retries; a priority queue remains planned |
 | App Store rejection | Medium | Low | Native implementation (Option B), clear content attribution, privacy policy page |
 | Solo-developer burnout | Medium | Medium | M0–M3 delivers ~80% of the real value. Ship a genuinely useful state there and pause |
 

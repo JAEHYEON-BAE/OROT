@@ -163,3 +163,55 @@ def test_idempotency_check_ignores_superseded_events() -> None:
     ).read_text(encoding="utf-8")
     body = source.split("async def _existing_event_release_ids")[1].split("async def ")[0]
     assert "superseded_at.is_(None)" in body
+
+
+# ─── 삭제 가능 여부 (T-132) ──────────────────────────────────────
+
+
+def _admin_source() -> str:
+    return (
+        Path(__file__).resolve().parents[3] / "apps/api/src/vinyl_api/routers/admin.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_delete_guard_and_ui_share_one_judgement() -> None:
+    """화면이 되지 않는 동작을 권하면 안 된다 (T-133).
+
+    삭제 가능 여부와 화면의 버튼이 **같은 조건**에서 나와야 한다.
+    다르면 눌러도 409 만 뜨는 버튼이 생긴다 — 실제로 그런 적이 있다.
+    """
+    source = _admin_source()
+    assert "can_delete=" in source
+    assert "not await _linked_listing_exists(session, release.id)" in source
+    assert "if release.is_published:" in source
+
+    ui = (
+        Path(__file__).resolve().parents[3] / "apps/api/src/vinyl_api/routers/admin_ui.py"
+    ).read_text(encoding="utf-8")
+    assert "r.can_delete" in ui
+
+
+def test_published_release_cannot_be_deleted() -> None:
+    """공개 중인 일정을 지우려면 **공개 취소를 한 번 거치게** 한다 (T-133).
+
+    살아 있는 일정을 실수로 지우는 것을 막는 유일한 단계다.
+    """
+    assert "공개를 먼저 취소하십시오" in _admin_source()
+
+
+def test_delete_removes_events_because_cascade_does_not() -> None:
+    """`listing_events.release_id` 에는 CASCADE 가 없다 — 직접 지워야 한다.
+
+    빠뜨리면 삭제가 FK 위반으로 실패하고, 그 실패는 **응답 뒤에** 터진다.
+    발송 기록은 `event_id` CASCADE 로 함께 사라진다.
+    """
+    source = _admin_source()
+    assert "delete(ListingEvent).where(ListingEvent.release_id == release.id)" in source
+
+
+def test_delete_refuses_when_crawled_listings_point_at_it() -> None:
+    """`listings` 행은 절대 지우지 않는다 (규칙 4).
+
+    그렇다고 남기면 사라진 발매를 가리키게 되므로, 이 경우에는 삭제를 거절한다.
+    """
+    assert "_linked_listing_exists" in _admin_source()

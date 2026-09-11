@@ -94,14 +94,14 @@ PG_DB   = $(shell sed -n 's/^POSTGRES_DB=//p' .env 2>/dev/null | head -1)
 
 backup: .env  ## DB 전체를 backups/ 에 덤프 (gzip)
 	@mkdir -p $(BACKUP_DIR)
-	@user="$${PG_USER:-$(PG_USER)}"; db="$${PG_DB:-$(PG_DB)}"; 	 user=$${user:-vinyl}; db=$${db:-vinyl_radar}; 	 file="$(BACKUP_DIR)/$$db-$$(date +%Y%m%d-%H%M%S).sql.gz"; 	 $(DC) exec -T postgres pg_dump -U "$$user" -d "$$db" --clean --if-exists 	   | gzip > "$$file" || { rm -f "$$file"; echo "!! 백업 실패"; exit 1; }; 	 test -s "$$file" || { rm -f "$$file"; echo "!! 백업이 비어 있습니다"; exit 1; }; 	 echo "저장됨: $$file ($$(du -h "$$file" | cut -f1))"
+	@set -o pipefail; user="$${PG_USER:-$(PG_USER)}"; db="$${PG_DB:-$(PG_DB)}"; 	 user=$${user:-vinyl}; db=$${db:-vinyl_radar}; 	 file="$(BACKUP_DIR)/$$db-$$(date +%Y%m%d-%H%M%S).sql.gz"; 	 $(DC) exec -T postgres pg_dump -U "$$user" -d "$$db" --clean --if-exists 	   | gzip > "$$file" || { rm -f "$$file"; echo "!! 백업 실패"; exit 1; }; 	 test -s "$$file" || { rm -f "$$file"; echo "!! 백업이 비어 있습니다"; exit 1; }; 	 echo "저장됨: $$file ($$(du -h "$$file" | cut -f1))"
 
 restore: .env  ## FILE=backups/xxx.sql.gz 에서 복구 — **기존 데이터를 덮어씁니다**
 	@test -n "$(FILE)" || { echo "사용법: make restore FILE=backups/xxx.sql.gz"; 	  ls -1t $(BACKUP_DIR)/*.sql.gz 2>/dev/null | head -5 | sed 's/^/  후보: /'; exit 1; }
 	@test -f "$(FILE)" || { echo "!! 파일이 없습니다: $(FILE)"; exit 1; }
 	@echo "!! $(FILE) 로 복구하면 현재 DB 내용을 덮어씁니다."
 	@printf '   계속하려면 yes 를 입력하세요: '; read ans; test "$$ans" = "yes" || { echo "취소함"; exit 1; }
-	@user="$${PG_USER:-$(PG_USER)}"; db="$${PG_DB:-$(PG_DB)}"; 	 user=$${user:-vinyl}; db=$${db:-vinyl_radar}; 	 gunzip -c "$(FILE)" | $(DC) exec -T postgres psql -U "$$user" -d "$$db" -q 	 && echo "복구 완료: $(FILE)"
+	@set -o pipefail; user="$${PG_USER:-$(PG_USER)}"; db="$${PG_DB:-$(PG_DB)}"; 	 user=$${user:-vinyl}; db=$${db:-vinyl_radar}; 	 tmp=$$(mktemp); trap 'rm -f "$$tmp"' EXIT; gunzip -c "$(FILE)" > "$$tmp" || exit 1; $(DC) exec -T postgres psql -U "$$user" -d "$$db" -q -v ON_ERROR_STOP=1 --single-transaction < "$$tmp" 	 && echo "복구 완료: $(FILE)"
 
 # ─── .env 암호화 백업 (T-120) ────────────────────────────────────
 # `backup` 은 DB 만 덤프한다. 그 DB 를 쓸모 있게 만드는 VAPID 개인키는 .env 에만

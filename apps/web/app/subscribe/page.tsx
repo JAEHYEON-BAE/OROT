@@ -1,12 +1,11 @@
-import { apiBase } from "@/lib/api";
-
 import PushToggle from "./PushToggle";
 
 export const metadata = { title: "구독 — Vinyl Radar" };
+export const dynamic = "force-dynamic";
 
 export default function SubscribePage() {
   // 브라우저에 보여 줄 주소는 컨테이너 내부 주소가 아니라 공개 주소여야 한다.
-  const publicBase = process.env.PUBLIC_API_URL ?? apiBase;
+  const publicBase = (process.env.PUBLIC_WEB_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const ics = `${publicBase}/v1/releases.ics`;
   const rss = `${publicBase}/v1/feed.rss`;
 

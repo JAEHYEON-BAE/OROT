@@ -387,7 +387,7 @@ def test_notification_url_is_absolute_and_same_origin(case: EdgeCase) -> None:
 
 
 def test_notification_tag_separates_events_so_history_survives() -> None:
-    """서로 다른 알림은 서로를 지우지 않는다 (T-122).
+    """서로 다른 알림은 서로를 지우지 않는다 (T-131).
 
     브라우저는 같은 `tag` 의 알림을 대체한다. 발매 단위로 묶으면 '예약 임박'이
     '예약 시작'에 덮여 **알림 목록에서 사라진다.** 목록은 상태가 아니라 기록이고,

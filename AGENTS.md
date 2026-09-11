@@ -9,9 +9,10 @@ enable it as incidental cleanup or expand the product into a sales catalog.
 
 Read `CLAUDE.md` for project rules and implementation pitfalls, and consult
 `docs/BLUEPRINT.ko.md` (authoritative specification), its English mirror, and
-relevant `docs/adr/` decisions before implementation. README milestone and
-directory descriptions contain early scaffolding information; verify current
-behavior in code. Keep both blueprints synchronized when changing the spec.
+relevant `docs/adr/` decisions before implementation. Current source, migrations
+and runtime configuration take precedence over stale descriptions; update the
+documents when they disagree. The blueprints distinguish implemented behavior
+from planned features. Keep both editions synchronized when changing the spec.
 For backlog work, announce the applicable `T-XXX` ID and complete one task's
 acceptance criteria at a time. Document unresolved architectural decisions in a
 draft ADR before requesting a decision; do not invent a task ID for maintenance.
@@ -56,10 +57,11 @@ services. Use saved fixtures and mocks; if a required source fixture is missing,
 ask for it rather than silently scraping a replacement.
 
 For web changes, run `npm run lint` and `npm run build` from `apps/web/`.
-There is currently no web test script. `make up` builds and starts the local
+Run `node --test tests/*.test.mjs` there for web regressions; no npm test script exists. `make up` builds and starts the local
 stack; `make down` preserves DB volumes. Database operations such as
 `make migrate`, `make revision m="description"`, and `make seed` use running
-containers. Do not start production services merely to validate documentation.
+containers. For documentation-only work, verify paths, commands and contracts without starting
+or rebuilding services. Python/web test suites are required for implementation changes.
 
 ## Implementation conventions and invariants
 
@@ -70,14 +72,23 @@ containers. Do not start production services merely to validate documentation.
   source text in `_raw`, and normalized values separately in `_norm`.
 - Store timestamps in UTC with timezone-aware columns; convert KST inputs at
   the boundary. Keep won prices integral (`NUMERIC(12,0)`), never floats.
-- Public queries must exclude unpublished releases and private notes. Flush
-  database writes before returning success so constraints fail in the request.
-- Preserve event and delivery history. Schedule changes supersede affected
-  events rather than deleting them; publishing and delivery must be idempotent.
+- Public queries must exclude unpublished releases and private notes. Flush writes
+  early and keep the function-scoped session dependency: commit precedes response.
+- Schedule changes supersede affected events and preserve delivery history, even
+  when editing an unpublished release. An authorized deletion of an unpublished
+  release removes its events and cascades to deliveries; linked listings block it.
+  Unique delivery rows and scheduler locks prevent normal duplicate processing,
+  but external push and DB commit are not atomic across crashes.
 - Variants are distinct releases. Entity resolution must be reversible through
   `listings.release_id`; never delete listing rows as part of a merge.
-- Browser push requests use same-origin `app/api/push/*` handlers and
-  `lib/proxy.ts`; server API access uses `API_BASE_URL` (ADR-0007).
+- Browser push requests use same-origin `app/api/push/*` handlers and `lib/proxy.ts`;
+  RSS/ICS use fixed `app/v1/*` proxies. Server API access uses `API_BASE_URL`;
+  public links use `PUBLIC_WEB_URL` in api, collector and web (ADR-0007).
+- Web API types in `apps/web/lib/api.ts` are handwritten today. OpenAPI is a
+  generated snapshot, not an installed TypeScript/Swift client generation pipeline.
+- `make prod` builds the web without source mounts. API still reloads mounted
+  Python source; collector requires restart after source edits. Environment
+  changes require container recreation, not only restart.
 - Keep blocking `pywebpush` calls off the async event loop. Never send real test
   notifications without the user's authorization.
 - Crawlers must honor robots.txt, stay at or below 0.5 requests/second per source
@@ -95,7 +106,9 @@ Destructive database or infrastructure operations require explicit authorization
 volume deletion, `docker compose down -v`, `colima delete`, pruning, unrestricted
 SQL deletes, and restores that overwrite existing data. Back up before authorized
 destructive work. Test cleanup must target only records created by that test;
-do not assume a shared database is disposable.
+do not assume a shared database is disposable. Prefer the isolated-schema check
+in `apps/api/tests/integration_runtime.py` with its fake sender and outer rollback.
+Use exact IDs from the test run for any shared-DB cleanup, never title patterns.
 
 Use existing commit conventions when a commit is requested:
 `<type>(<scope>): <T-ID> <summary>` for backlog tasks. Keep changes scoped, update

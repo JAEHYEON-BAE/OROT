@@ -62,7 +62,7 @@ class PushSubscriptionIn(BaseModel):
     @field_validator("endpoint")
     @classmethod
     def _known_push_service(cls, v: str) -> str:
-        """알려진 푸시 서비스로 가는 https 주소만 받는다 (T-121).
+        """알려진 푸시 서비스로 가는 https 주소만 받는다 (T-130).
 
         **이 검증이 없으면 SSRF 다.** 구독에는 인증이 없으므로, 임의 URL 을 등록하면
         인터넷의 누구나 이 서버가 내부망으로 요청을 보내게 만들 수 있다.

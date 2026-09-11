@@ -7,10 +7,10 @@ export const dynamic = "force-dynamic";
 
 async function getRelease(id: string): Promise<Release | null> {
   // **경로 조각은 누구나 넣는다.** 숫자가 아니면 API 를 부르지도 않는다 —
-  // 부르면 422 가 오고, 그것을 던지면 500 이 된다 (T-121).
+  // 부르면 422 가 오고, 그것을 던지면 500 이 된다 (T-130).
   if (!/^\d{1,18}$/.test(id)) return null;
 
-  const res = await fetch(`${apiBase}/v1/releases/${id}`, { cache: "no-store" });
+  const res = await fetch(`${apiBase}/v1/releases/${id}`, { cache: "no-store", signal: AbortSignal.timeout(10_000) });
   if (res.status === 404 || res.status === 422) return null;
   if (!res.ok) throw new Error(`API ${res.status}`);
   return res.json() as Promise<Release>;
@@ -73,7 +73,7 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
                   className="flex items-center gap-3 rounded border border-neutral-200 px-3 py-2 text-sm hover:bg-neutral-50 dark:border-neutral-800 dark:hover:bg-neutral-900"
                 >
                   <span>{link.shop_name}</span>
-                  {link.price_krw && (
+                  {link.price_krw != null && (
                     <span className="ml-auto tabular-nums">
                       {Number(link.price_krw).toLocaleString("ko-KR")}원
                     </span>

@@ -82,3 +82,27 @@ async def test_exception_details_do_not_leak_subscription_secrets(monkeypatch):
     )
     assert result.outcome == SendOutcome.FAILED
     assert result.error == "ValueError"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [404, 410, 429, 500, 503])
+async def test_push_service_status_classification(monkeypatch, status):
+    from pywebpush import WebPushException
+
+    monkeypatch.setattr(
+        "vinyl_collector.push_sender.get_settings",
+        lambda: SimpleNamespace(
+            push_enabled=True, vapid_private_key="unused", vapid_subject="mailto:test@example.com"
+        ),
+    )
+
+    def fail(**kwargs):
+        raise WebPushException(
+            "synthetic service error", response=SimpleNamespace(status_code=status)
+        )
+
+    monkeypatch.setattr("vinyl_collector.push_sender._send_push", fail)
+    result = await WebPushSender().send(
+        DeviceToken(token="https://fcm.googleapis.com/send/a", p256dh="key", auth="auth"), {}
+    )
+    assert result.outcome == (SendOutcome.GONE if status in {404, 410} else SendOutcome.FAILED)

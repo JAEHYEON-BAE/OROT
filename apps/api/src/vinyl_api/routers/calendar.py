@@ -5,13 +5,14 @@
 예약 시작 일정이 자기 캘린더에 뜨고 앱이 알아서 알림까지 준다.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from vinyl_core.models import Artist, Release
+from vinyl_core.settings import get_settings
 
 from vinyl_api.deps import SessionDep
 from vinyl_api.icalendar import CalendarBuilder
@@ -64,7 +65,7 @@ async def releases_ics(
     ).all()
 
     calendar = CalendarBuilder(CALENDAR_NAME, CALENDAR_DESC)
-    base = str(request.base_url).rstrip("/")
+    base = get_settings().public_web_url.rstrip("/")
 
     for release in releases:
         artist_name = None
@@ -76,7 +77,7 @@ async def releases_ics(
         if release.format:
             label = f"{label} ({release.format})"
 
-        buy_url = release.links[0].url if release.links else f"{base}/v1/releases/{release.id}"
+        buy_url = release.links[0].url if release.links else f"{base}/releases/{release.id}"
         details = [f"{shop.shop_name}: {shop.url}" for shop in release.links]
         if release.variant:
             details.insert(0, f"바리언트: {release.variant}")
@@ -86,13 +87,11 @@ async def releases_ics(
             details.append(f"예약 마감: {release.preorder_closes_at.isoformat()}")
 
         if release.preorder_opens_at is not None:
-            end = release.preorder_opens_at.replace(
-                minute=(release.preorder_opens_at.minute + PREORDER_BLOCK_MINUTES) % 60
-            )
+            end = release.preorder_opens_at + timedelta(minutes=PREORDER_BLOCK_MINUTES)
             calendar.add_timed_event(
                 uid=_uid(release.id, "preorder"),
                 start=release.preorder_opens_at,
-                end=max(end, release.preorder_opens_at),
+                end=end,
                 summary=f"예약 시작 · {label}",
                 description="\n".join(details),
                 url=buy_url,

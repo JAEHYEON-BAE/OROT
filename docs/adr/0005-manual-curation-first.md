@@ -85,7 +85,7 @@
 
 | 시점 | 알림 |
 |---|---|
-| 일정 등록 시 | `SCHEDULE_ADDED` |
+| 일정 최초 공개 시 (초안 등록은 제외) | `SCHEDULE_ADDED` |
 | `preorder_opens_at` 24시간 전 | `PREORDER_OPENS_SOON` |
 | `preorder_opens_at` | `PREORDER_OPEN` (최우선) |
 | `release_date` | `RELEASED` |
@@ -99,7 +99,7 @@
 ### 4.4 이미 만든 자동 수집 코드는 **버리지 않고 잠시 재운다**
 
 `fetcher.py`, `adapters/gimbab.py`, `registry.py`, 시드, 스키마는 전부 테스트를 통과한 상태로 남는다.
-제품 루프에 배선되지 않을 뿐이며, M2(자동 수집 재개)에서 그대로 쓴다.
+제품 루프에 배선되지 않을 뿐이며, M3(자동 수집 재개)에서 그대로 쓴다.
 ADR-0002~0004 의 결정(목록 기반 수집, 포크라노스 상세 파싱, robots 파서)도 그때 유효하다.
 
 ## 5. 스키마 변경
@@ -151,7 +151,7 @@ CREATE TABLE release_links (
 |---|---|
 | **M0**(완료분 유지) | 스캐폴딩·스키마·수집기 부품 — 이미 완료 |
 | **M1** | **수동 등록 → 공개 피드**. 관리 API, `/v1/releases`, `/v1/feed`, RSS, iCalendar, 웹 피드·캘린더 |
-| **M2** | **시각 기반 알림**. 스케줄러가 `preorder_opens_at` 을 보고 발송. 이메일 또는 웹푸시(계정 불필요 구독) |
+| **M2** | **시각 기반 알림**. 스케줄러가 `preorder_opens_at` 을 보고 발송. Web Push(계정 불필요 구독, ADR-0006에서 확정) |
 | **M3** | **자동 수집 재개**. 잠들어 있던 어댑터를 배선. 수동 등록과 병존 (`curation` 으로 구분) |
 | **M4+** | 계정·워치리스트·iOS·푸시. 경량 병합·검색은 필요해질 때 |
 

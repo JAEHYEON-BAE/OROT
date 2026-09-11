@@ -15,7 +15,7 @@ from typing import Final, Protocol
 from urllib.parse import urlparse
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -41,6 +41,9 @@ MAX_NOTIFY_AGE: Final = timedelta(hours=48)
 
 # 한 번의 실행에서 만들 최대 배송 수. 폭주를 막는 안전장치.
 MAX_BATCH: Final = 500
+MAX_ATTEMPTS: Final = 3
+# Retry windows are measured from delivery creation; each scheduler tick sends once.
+RETRY_DELAYS: Final = (timedelta(minutes=1), timedelta(minutes=5))
 
 _EVENT_LABEL: Final = {
     EventType.SCHEDULE_ADDED.value: "새 일정",
@@ -51,7 +54,7 @@ _EVENT_LABEL: Final = {
 }
 
 
-# ─── 구독 엔드포인트 허용 목록 (T-121) ──────────────────────────
+# ─── 구독 엔드포인트 허용 목록 (T-130) ──────────────────────────
 #
 # **이것이 없으면 SSRF 다.** 구독 등록에는 인증이 없고(ADR-0006), `endpoint` 는
 # 클라이언트가 주는 URL 이다. 검증하지 않으면 인터넷의 누구나 임의 주소를 등록해
@@ -72,7 +75,7 @@ ALLOWED_PUSH_HOSTS: Final = frozenset(
 
 # 엔드포인트 길이 상한. 실제 값은 200자 안팎이다.
 # 8KB 를 넘기면 `device_tokens.token` 의 UNIQUE 인덱스가 터져 500 이 난다 —
-# 인증 없이 누구나 서버 오류를 만들 수 있는 경로였다 (T-121).
+# 인증 없이 누구나 서버 오류를 만들 수 있는 경로였다 (T-130).
 MAX_ENDPOINT_LENGTH: Final = 2048
 
 # 브라우저가 주는 암호화 키 길이 상한 (RFC 8291). p256dh 는 65바이트, auth 는 16바이트를
@@ -133,6 +136,15 @@ class DispatchResult:
     sent: int = 0
     failed: int = 0
     expired: int = 0
+    exhausted: int = 0
+    """재시도를 다 쓰고 **영영 실패한** 배송 수 (T-116).
+
+    이것이 0 이 아니면 구독자가 알림을 못 받았다는 뜻이다 —
+    스케줄러가 이 값을 보고 운영자에게 알린다. 실패(`failed`)와 구분해야 한다:
+    실패는 다음 주기에 다시 시도하지만, 소진은 더 이상 시도하지 않는다.
+    """
+    deactivated: int = 0
+    """만료(404/410)로 이번에 꺼진 구독 수."""
 
 
 def _one_line(text: str) -> str:
@@ -169,10 +181,10 @@ def build_payload(
     return {
         "title": _one_line(f"[{action}] {label}"),
         "body": _one_line(" · ".join(details)) or "자세히 보려면 눌러 주세요",
-        "url": f"{base_url}/releases/{release.id}",
+        "url": f"{base_url.rstrip('/')}/releases/{release.id}",
         # 브라우저는 같은 `tag` 의 알림을 **하나로 묶어 뒤엣것이 앞엣것을 대체**한다.
         #
-        # 그래서 발매 단위가 아니라 **이벤트 단위**로 묶는다 (T-122).
+        # 그래서 발매 단위가 아니라 **이벤트 단위**로 묶는다 (T-131).
         # 발매 단위로 묶으면 '예약 임박'이 '예약 시작'에 덮여 사라지는데,
         # 알림 목록은 상태가 아니라 **기록**이다 — 놓친 알림을 나중에 돌아보는 곳이라
         # 지워 버리면 "예약이 언제 시작한다고 했더라"를 확인할 방법이 없다.
@@ -201,9 +213,13 @@ async def plan_deliveries(
     events = list(
         await session.scalars(
             select(ListingEvent)
+            .join(Release, ListingEvent.release_id == Release.id)
             .where(
                 ListingEvent.event_type.in_([e.value for e in NOTIFIABLE]),
                 ListingEvent.occurred_at >= horizon,
+                ListingEvent.occurred_at <= moment,
+                ListingEvent.superseded_at.is_(None),
+                Release.is_published.is_(True),
                 ListingEvent.release_id.is_not(None),
             )
             .order_by(ListingEvent.occurred_at.asc())
@@ -271,22 +287,57 @@ async def dispatch_pending(
     pending = list(
         await session.scalars(
             select(NotificationDelivery)
-            .where(NotificationDelivery.status == DeliveryStatus.PENDING.value)
-            .order_by(NotificationDelivery.created_at.asc())
+            .where(
+                or_(
+                    NotificationDelivery.status == DeliveryStatus.PENDING.value,
+                    (NotificationDelivery.status == DeliveryStatus.FAILED.value)
+                    & (NotificationDelivery.attempts < MAX_ATTEMPTS)
+                    & (
+                        NotificationDelivery.created_at
+                        <= case(
+                            (NotificationDelivery.attempts <= 1, moment - RETRY_DELAYS[0]),
+                            else_=moment - RETRY_DELAYS[1],
+                        )
+                    ),
+                )
+            )
+            .order_by(
+                case((NotificationDelivery.status == DeliveryStatus.PENDING.value, 0), else_=1),
+                NotificationDelivery.created_at.asc(),
+                NotificationDelivery.id.asc(),
+            )
+            .with_for_update(skip_locked=True)
             .limit(MAX_BATCH)
         )
     )
 
-    sent = failed = expired = 0
+    sent = failed = expired = exhausted = deactivated = 0
     for delivery in pending:
         event = await session.get(
-            ListingEvent, delivery.event_id, options=[selectinload(ListingEvent.release)]
+            ListingEvent,
+            delivery.event_id,
+            options=[selectinload(ListingEvent.release)],
+            populate_existing=True,
         )
-        subscription = await session.get(DeviceToken, delivery.device_token_id)
+        subscription = await session.get(
+            DeviceToken, delivery.device_token_id, populate_existing=True
+        )
         if event is None or subscription is None or event.release is None:
-            delivery.status = DeliveryStatus.FAILED
+            delivery.status = DeliveryStatus.EXPIRED
             delivery.last_error = "이벤트 또는 구독을 찾을 수 없음"
-            failed += 1
+            expired += 1
+            continue
+
+        if (
+            event.superseded_at is not None
+            or not event.release.is_published
+            or not subscription.is_active
+            or event.occurred_at < moment - MAX_NOTIFY_AGE
+            or event.occurred_at < subscription.created_at
+        ):
+            delivery.status = DeliveryStatus.EXPIRED
+            delivery.last_error = "일정 무효화, 공개 취소, 구독 해지 또는 발송 기한 초과"
+            expired += 1
             continue
 
         artist_name = None
@@ -296,7 +347,12 @@ async def dispatch_pending(
 
         payload = build_payload(event, event.release, artist_name, base_url)
         delivery.attempts += 1
-        send_result = await sender.send(subscription, payload)
+        try:
+            send_result = await sender.send(subscription, payload)
+        except Exception as exc:
+            # A broken sender must not roll back earlier successful deliveries.
+            log.exception("push.sender_failed", delivery_id=delivery.id)
+            send_result = SendResult(SendOutcome.FAILED, type(exc).__name__)
 
         if send_result.outcome is SendOutcome.SENT:
             delivery.status = DeliveryStatus.SENT
@@ -309,17 +365,29 @@ async def dispatch_pending(
             # 구독이 사라졌다. 재시도해도 소용없으므로 구독을 끈다.
             delivery.status = DeliveryStatus.EXPIRED
             delivery.last_error = send_result.error
-            subscription.is_active = False
+            if subscription.is_active:
+                subscription.is_active = False
+                deactivated += 1
+                log.info("push.subscription.expired", subscription_id=subscription.id)
             expired += 1
-            log.info("push.subscription.expired", subscription_id=subscription.id)
         else:
             delivery.status = DeliveryStatus.FAILED
             delivery.last_error = send_result.error
             subscription.failure_count += 1
+            if delivery.attempts >= MAX_ATTEMPTS:
+                exhausted += 1
+                log.error("push.retry_exhausted", delivery_id=delivery.id)
             failed += 1
 
     await session.flush()
-    result = DispatchResult(planned=planned, sent=sent, failed=failed, expired=expired)
+    result = DispatchResult(
+        planned=planned,
+        sent=sent,
+        failed=failed,
+        expired=expired,
+        exhausted=exhausted,
+        deactivated=deactivated,
+    )
     if planned or sent or failed or expired:
         log.info(
             "notifications.dispatched",
@@ -327,5 +395,7 @@ async def dispatch_pending(
             sent=sent,
             failed=failed,
             expired=expired,
+            exhausted=exhausted,
+            deactivated=deactivated,
         )
     return result

@@ -82,7 +82,13 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || "/", self.location.origin);
+  let target;
+  try {
+    target = new URL(event.notification.data?.url || "/", self.location.origin);
+    if (target.origin !== self.location.origin) target = new URL("/", self.location.origin);
+  } catch {
+    target = new URL("/", self.location.origin);
+  }
 
   event.waitUntil(
     (async () => {
@@ -133,6 +139,7 @@ self.addEventListener("pushsubscriptionchange", (event) => {
       const oldEndpoint = event.oldSubscription?.endpoint;
       try {
         const res = await fetch("/api/push/public-key");
+        if (!res.ok) throw new Error(`공개키 조회 실패 (${res.status})`);
         const { public_key: publicKey, enabled } = await res.json();
         if (!enabled) return;
 
@@ -143,11 +150,13 @@ self.addEventListener("pushsubscriptionchange", (event) => {
             applicationServerKey: urlBase64ToUint8Array(publicKey),
           }));
 
-        await fetch("/api/push/subscribe", {
+        const response = await fetch("/api/push/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(fresh.toJSON ? fresh.toJSON() : fresh),
         });
+
+        if (!response.ok) throw new Error(`구독 갱신 실패 (${response.status})`);
 
         // 죽은 엔드포인트를 남겨 두면 발송기가 매 주기 그쪽으로 요청을 보낸다.
         if (oldEndpoint && oldEndpoint !== fresh.endpoint) {

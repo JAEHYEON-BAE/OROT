@@ -1,24 +1,19 @@
-# Vinyl Radar — 국내 바이닐 발매 정보 통합 서비스 청사진 (한국어판)
+# Vinyl Radar — 바이닐 발매·예약 일정 서비스 청사진 (한국어판)
 
-> **문서 목적**: 본 문서는 사람과 코딩 에이전트(Claude Code, Codex 등)가 **동일하게** 참조하는 단일 진실 공급원(Single Source of Truth)입니다.
-> 영어판은 `docs/BLUEPRINT.en.md`이며 두 문서는 항상 동기화되어야 합니다. 내용이 충돌할 경우 **한국어판을 우선**합니다.
->
-> **문서 버전**: 1.0.0
-> **최종 수정**: 2026-08-20
-
----
+> **기준일: 2026-09-11 · 버전 1.1.0**. 현재 구현은 소스·마이그레이션·실행 설정을 기준으로 설명한다.
+> 문서와 구현이 충돌하면 구현을 우선하여 문서를 갱신한다. 미구현 계획은 현재 동작이나 자동 실행 지시가 아니다.
+> [영어판](BLUEPRINT.en.md)과 함께 유지하며, 두 판의 설명이 충돌하면 한국어판을 먼저 바로잡고 번역한다.
 
 ## 0. 에이전트를 위한 우선 지시사항 (READ FIRST)
 
-코딩 에이전트는 작업을 시작하기 전에 다음을 반드시 준수합니다.
-
-1. **작업 단위는 `§10 작업 백로그`의 태스크 ID(`T-XXX`)를 기준으로 합니다.** 한 번에 하나의 태스크만 수행하고, 완료 조건(Acceptance Criteria)을 모두 충족한 뒤 다음 태스크로 이동합니다.
-2. **파일을 새로 만들기 전에 `§6 리포지토리 구조`에 해당 경로가 정의되어 있는지 확인합니다.** 정의되지 않은 최상위 디렉터리를 임의로 생성하지 않습니다.
-3. **스크래핑 대상 사이트에 실제 요청을 보내는 코드는 테스트에서 실행하지 않습니다.** 테스트는 반드시 `tests/fixtures/` 에 저장된 HTML 스냅샷을 사용합니다.
-4. **`§3.4 수집 윤리 및 법적 준수사항`을 위반하는 코드는 작성하지 않습니다.** 특히 robots.txt 무시, 초당 1회를 초과하는 요청, 이미지 원본 재호스팅은 금지합니다.
-5. **커밋 단위는 태스크 단위입니다.** 커밋 메시지는 `feat(collector): T-014 세컨드트랙 어댑터 구현` 형식을 따릅니다.
-6. **불확실한 설계 결정은 임의로 확정하지 않습니다.** `docs/adr/` 에 ADR(Architecture Decision Record) 초안을 작성하고 사용자에게 확인을 요청합니다.
-7. **Python 작업 시 반드시 프로젝트 가상환경(`.venv`)을 활성화한 상태에서 실행합니다.**
+1. 사용자 지시 범위를 우선한다. 백로그 작업은 기존 `T-XXX`를 명시하고 하나씩 완료한다. 유지보수·점검에 임의의 태스크 ID를 만들지 않는다.
+2. §6의 현재 경로와 향후 예약 경로를 구분한다. 정의되지 않은 최상위 디렉터리를 만들지 않는다.
+3. 자동 테스트는 외부 실사이트에 요청하지 않는다. 어댑터는 저장된 HTML fixture, 푸시는 가짜 발송기로 검증한다. `collector run --dry-run`은 실제 네트워크 요청이므로 자동 테스트가 아니다.
+4. 수집 정책은 §3.4를 따른다: 소스별 최대 0.5 req/s, 동시 연결 2 이하, robots 준수, 메타데이터만 사용.
+5. 구현 변경에는 `make lint`와 `make test`, 웹 변경에는 웹 lint·Node 테스트·build를 실행한다. 문서만 고칠 때는 경로·명령·계약 대조를 하고 서비스를 재기동하지 않는다.
+6. 새 아키텍처 결정이 필요하면 ADR 초안을 작성한다. 이미 승인된 방향의 구현·문서 정정은 다시 허가를 요구하지 않는다.
+7. Python은 `venv/bin/python`, Make 타깃 또는 컨테이너의 Python을 사용한다.
+8. 기존 데이터·키·백업을 보존한다. 파괴적 조작은 승인 범위에서만 수행하며, 테스트는 격리 스키마와 롤백을 우선한다. 공유 DB의 정리는 해당 실행에서 만든 정확한 ID만 대상으로 한다.
 
 ---
 
@@ -54,6 +49,8 @@
 
 ### 1.3 성공 지표 (MVP 기준)
 
+> 아래는 제품 목표이며 현재 측정 결과나 보장된 SLA가 아니다. 외부 무음 실패 알림은 아직 미구현이다.
+
 | 지표 | 목표 |
 |---|---|
 | 등록된 일정 수 (주간) | 20건 이상 |
@@ -83,142 +80,73 @@
 
 ## 2. 아키텍처 개요
 
-### 2.1 전체 구성도
+### 2.1 현재 실행 흐름
 
-**1단계 — 수동 등록 (현재, [ADR-0005](adr/0005-manual-curation-first.md))**
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  운영자 (개발자)                                                  │
-│    · 발매 일정 등록 / 수정 / 공개                                  │
-│    · 인증: ADMIN_API_KEY (계정 시스템 없음)                        │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │ POST /admin/releases
-┌─────────────────────────────▼────────────────────────────────────┐
-│                     PostgreSQL 16                                 │
-│  releases (일정·예약창·공개여부) · release_links (구매 링크)        │
-│  listing_events (알림 원천) · sources                             │
-└─────────────────────────────┬────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              │                               │
-┌─────────────▼──────────────┐   ┌────────────▼─────────────────┐
-│  Scheduler (APScheduler)    │   │  FastAPI (REST, /v1)         │
-│  · preorder_opens_at 감시   │   │  · /v1/releases  /v1/feed    │
-│  · 24시간 전 / 정시 발송     │   │  · /v1/feed.rss              │
-│  · diff 엔진 불필요          │   │  · /v1/releases.ics          │
-└─────────────┬──────────────┘   └────────────┬─────────────────┘
-              │                               │
-              ▼                    ┌──────────┴──────────┐
-        알림 발송 큐                ▼                     ▼
-                              웹 피드/캘린더        RSS·캘린더 구독
-                                                  (인증 불필요)
+```text
+운영자 → localhost:8000/admin → FastAPI → PostgreSQL
+                              초안 등록 → 공개 → SCHEDULE_ADDED
+PostgreSQL ← collector: 60초 tick → 시각 이벤트 → 배송 계획 → WebPushSender
+                                                       ↓
+                                     브라우저 푸시 서비스 → sw.js → 기기 알림
+인터넷 → Tailscale Funnel → localhost:3000 → Next.js → 내부 FastAPI
+                                             ├ 피드·상세·캘린더·구독
+                                             ├ /api/push/* 중계
+                                             └ /v1/feed.rss · /v1/releases.ics 중계
 ```
 
-**핵심 설계 판단**: 알림 트리거가 **시각 기반**이다. 운영자가 `preorder_opens_at` 을 입력하므로
-"직전 상태와 비교"하는 diff 엔진이 필요 없다. 발송 누락은 추정 오류가 아니라 **버그**다.
+단일 collector의 APScheduler가 이벤트 생성과 발송을 같은 tick에서 실행한다.
+별도 메시지 브로커·APNs 발송기·워치리스트 매칭은 없다. 자동 수집 어댑터와 Fetcher는
+수동 `collector run --dry-run`에서만 연결되며, DB 적재·주기 수집은 M3 계획이다.
 
-또한 **RSS·iCalendar 는 인증이 필요 없다.** 계정 시스템과 푸시 인프라를 만들기 전에
-핵심 약속을 배송할 수 있다.
+### 2.2 현재 기술 스택과 보류 사항
 
-**2단계 — 자동 수집 재개 (M3)**
-
-수집 부품은 **이미 만들어져 테스트를 통과한 상태로 대기**한다
-(`fetcher.py`, `adapters/`, `registry.py`). 제품 루프에 배선되지 않았을 뿐이다.
-
-```
-┌──────────┐  ┌──────────┐  ┌──────────┐
-│ 김밥      │  │ 세컨드    │  │ 포크라노스 │   ← 목록 페이지 기반 (ADR-0004)
-│ Adapter  │  │ 트랙      │  │ Adapter  │      신규·예약·재입고 표면만
-└────┬─────┘  └────┬─────┘  └────┬─────┘
-     └─────────────┴─────────────┘
-                   │ RawItem[]
-        ┌──────────▼──────────┐
-        │ Fetcher + Scheduler │  robots.txt · 0.5 req/s · 백오프
-        └──────────┬──────────┘
-                   │
-        ┌──────────▼──────────────────────────┐
-        │  listings (크롤 산출물)               │
-        │    ↓ curation='CRAWLED' 로 releases  │
-        │      에 연결. 수동 등록분과 병존       │
-        └─────────────────────────────────────┘
-```
-
-### 2.2 기술 스택 결정 및 근거
-
-| 계층 | 선택 | 근거 | 검토했으나 채택하지 않은 대안 |
-|---|---|---|---|
-| 수집기 | Python 3.12 + `httpx`(async) + `selectolax` | 정적 HTML이 대부분이라 헤드리스 브라우저가 불필요. selectolax는 BeautifulSoup 대비 5~10배 빠름 | Scrapy(프레임워크 오버헤드), Playwright(리소스 과다 — JS 렌더링 필요한 소스에만 선택적 사용) |
-| 스케줄러 | APScheduler (단일 컨테이너) | 소스 3~10개 규모에서 Celery+Redis는 과설계. 이후 필요 시 교체 가능한 인터페이스 유지 | Celery Beat(브로커 운영 부담), GitHub Actions cron(5분 미만 주기 불가·상태 유지 곤란) |
-| DB | PostgreSQL 16 + `pg_trgm` + `unaccent` | 퍼지 문자열 매칭을 DB에서 처리 가능. JSONB로 소스별 원본 필드 보존 | MongoDB(관계형 병합 로직에 불리), SQLite(동시 쓰기 제약) |
-| API | FastAPI + Pydantic v2 + SQLAlchemy 2.0 | 기존 숙련 스택. OpenAPI 자동 생성 → iOS 클라이언트 코드 생성에 직결 | Django REST(무거움), Litestar(생태계) |
-| 웹 | Next.js 16 (App Router) + Tailwind, PWA | SSR로 SEO 확보(“OO 바이닐 발매” 검색 유입). React 생태계 | SvelteKit(팀 확장성), 순수 SPA(SEO 손실) |
-| iOS | SwiftUI + `URLSession` + Swift Concurrency | §8 참조. 네이티브 우선 권장 | WKWebView 래퍼(App Store 심사 4.2 리스크) |
-| 배포 | Docker Compose on EC2 (t4g.small, ARM) | 기존 경험 재사용. 월 $10 내외 | k8s(과설계), Vercel+Supabase(수집기 상주 프로세스 부적합) |
-| CI/CD | GitHub Actions → GHCR → SSH 배포 | 기존 경험 재사용 | ArgoCD(과설계) |
-| 관측 | structlog(JSON) + Prometheus + Sentry | 파서 무음 실패 감지가 핵심 요구사항 | ELK(운영 부담) |
+| 계층 | 현재 구현 | 보류/미구현 |
+|---|---|---|
+| Python | Python ≥3.12, pip editable, Pydantic v2, SQLAlchemy 2 async | 별도 패키지 워크스페이스 도구 없음 |
+| API | FastAPI ≥0.121, 관리자 키 인증, 공개 조회·익명 푸시 구독 | JWT·계정·검색 API |
+| DB | PostgreSQL 16, pg_trgm/unaccent, Alembic | 확장을 이용한 검색·병합 서비스 |
+| 스케줄러·푸시 | APScheduler 60초, DB 배송 기록, pywebpush를 asyncio.to_thread로 호출 | 메시지 브로커·일일 요약·APNs |
+| 수집 부품 | httpx async, selectolax, urllib.robotparser, 3개 어댑터 | 자동 수집 적재·정규화·병합 |
+| 웹 | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI 앱·생성 클라이언트 |
+| 실행 | Docker Compose, Mac mini/colima + Funnel 공개 테스트 | EC2/GHCR/SSH 배포 |
+| 관측·자동화 | structlog, /healthz, 로컬 테스트와 백업 스크립트 | Prometheus·Sentry·외부 실패 알림·GitHub Actions |
 
 ---
 
 ## 3. 데이터 수집 계층 상세
 
-### 3.1 어댑터 인터페이스
+### 3.1 구현된 어댑터 인터페이스
 
-모든 소스는 아래 프로토콜을 구현합니다. **새 소스 추가 시 이 파일 외의 코드 변경이 없어야 합니다.**
+`packages/core/src/vinyl_core/adapters/base.py`가 계약이다. 등록은 `@register`와 모듈 자동 탐색으로
+처리하며 registry 수정은 필요 없다. 새 소스에는 어댑터 외에도 fixture·테스트·조사 문서·시드가 필요하다.
 
 ```python
-# packages/core/src/vinyl_core/adapters/base.py
-from typing import Protocol, AsyncIterator
-from datetime import datetime
-from decimal import Decimal
-from enum import StrEnum
-from pydantic import BaseModel, HttpUrl
+from collections.abc import AsyncIterator
+from typing import Protocol
+from vinyl_core.adapters.base import RawItem
 
-
-class StockStatus(StrEnum):
-    IN_STOCK = "IN_STOCK"        # 재고 있음
-    SOLD_OUT = "SOLD_OUT"        # 품절
-    PREORDER = "PREORDER"        # 예약판매 중
-    COMING_SOON = "COMING_SOON"  # 입고 예정 (구매 불가)
-    UNKNOWN = "UNKNOWN"
-
-
-class RawItem(BaseModel):
-    """어댑터가 반환하는 원시 항목. 정규화 전 상태를 그대로 보존한다."""
-    source_id: str                 # 예: "gimbab"
-    source_item_id: str            # 소스 내부 상품 ID (URL에서 추출)
-    url: HttpUrl
-    title_raw: str                 # 소스에 표기된 그대로. 절대 가공 금지
-    artist_raw: str | None
-    label_raw: str | None
-    price_krw: Decimal | None
-    stock_status: StockStatus
-    format_raw: str | None         # 예: "2LP", "LP+CD", "7\""
-    release_date_raw: str | None   # 예: "2026.09.12"
-    thumbnail_url: HttpUrl | None  # 저장만 하고 재호스팅하지 않음
-    extra: dict                    # 소스 고유 필드 (JSONB로 저장)
-    fetched_at: datetime
-
+class PageFetcher(Protocol):
+    async def fetch_text(self, url: str) -> str | None: ...
 
 class SourceAdapter(Protocol):
     source_id: str
     display_name: str
     base_url: str
-    crawl_interval_seconds: int    # 최소 300
+    crawl_interval_seconds: int
     requires_javascript: bool
 
-    async def discover(self) -> AsyncIterator[str]:
-        """수집 대상 **페이지** URL을 순회 반환한다 (목록 또는 상세 — ADR-0004)."""
-        ...
-
-    async def parse_page(self, url: str, html: str) -> list[RawItem]:
-        """페이지 HTML에서 RawItem을 모두 뽑는다.
-        목록이면 여러 건, 상세면 1건, 실패하면 빈 목록.
-        실패 시 반드시 로그를 남긴다 (예외를 삼키지 않는다)."""
-        ...
+    def discover(self) -> AsyncIterator[str]: ...
+    async def parse_page(self, url: str, html: str) -> list[RawItem]: ...
 ```
 
+`RawItem`의 필수값은 source_id·source_item_id·url·title_raw·stock_status다.
+부가 필드는 None, extra는 새 dict, fetched_at은 현재 UTC가 기본이다. 원화는 음수·소수를 거부하며
+fetched_at은 타임존을 요구한다. 파싱 실패는 빈 목록과 로그로 나타낸다.
+`PageFetcher`는 `vinyl_collector.bridge.FetcherPageAdapter`로 주입하여 core가 collector를 import하지 않게 한다.
+
 ### 3.2 소스별 조사 결과 및 구현 노트
+
+현재 gimbab·secondtrack·poclanos 어댑터가 모두 존재한다. 아래 우선순위의 M0/M1 표기는 초기 조사 순서이며 현재 제품 마일스톤 상태를 뜻하지 않는다.
 
 > **주의**: 각 사이트의 DOM 구조는 변경될 수 있습니다. 아래는 구현 착수 시점의 조사 가이드이며, 에이전트는 반드시 실제 HTML을 `tests/fixtures/<source_id>/` 에 저장한 뒤 셀렉터를 확정해야 합니다.
 
@@ -242,7 +170,11 @@ class SourceAdapter(Protocol):
 6-1. **목록 페이지와 상세 페이지를 각각 확인한다.** JS 렌더링 필요 여부와 수집 가능한 필드는 **페이지 종류마다 다르다.** 목록만으로 `RawItem` 필드를 모두 채울 수 있으면 **목록 기반 수집을 우선한다** — 요청 수가 페이지당 상품 수만큼 줄어든다 (ADR-0004)
 7. HTML 스냅샷 3건 이상을 fixture로 저장 (재고 있음 / 품절 / 예약판매 각 1건)
 
-### 3.3 수집 파이프라인 동작
+### 3.3 수집 파이프라인 계획 (M3, 미구현)
+
+현재 CLI는 discover → Fetcher → parse_page → 출력까지만 실행한다. DB 적재·last_seen_at 갱신·해시 비교 생략은 없다.
+Fetcher는 본문 해시를 계산하고 ETag/Last-Modified를 메모리에 보관하지만 영속 저장하지 않는다.
+아래 그림은 향후 배선 계획이며, 계정 매칭과 APNs도 현재 실행되지 않는다. 이메일 채널은 만들지 않는다 (ADR-0006).
 
 ```
 [Scheduler] 소스별 크론 트리거
@@ -261,7 +193,7 @@ class SourceAdapter(Protocol):
      ↓
 [EventDetector] 직전 listing 상태와 비교 → listing_events 생성
      ↓
-[NotificationDispatcher] 워치리스트 매칭 → APNs/이메일 발송 큐 적재
+[NotificationDispatcher] 워치리스트 매칭 → 설정된 푸시 채널 (향후)
 ```
 
 ### 3.4 수집 윤리 및 법적 준수사항 (필수)
@@ -280,6 +212,13 @@ class SourceAdapter(Protocol):
 | 차단 대응 | 429/403 수신 시 지수 백오프 후 해당 소스 자동 비활성화 + 운영자 알림 |
 | 사전 고지 | 서비스 공개 전 각 소스 운영자에게 이메일로 목적 설명 및 제휴/API 제공 가능 여부 문의 |
 
+**정책과 구현의 경계:** 위 표는 준수 정책이며 자동화가 전부 구현됐다는 뜻은 아니다.
+현재 403/429 반복 시 Fetcher는 백오프 후 SourceBlockedError를 내고 CLI가 중단한다.
+DB의 소스 자동 비활성화와 운영자 알림은 M3 미구현이다. robots 조회 실패는 금지로 취급하되
+404는 robots 없음으로 처리한다. urllib.robotparser의 최장 매치·와일드카드 한계는 ADR-0003과
+2개의 xfail 테스트에 기록되어 있다. 외부 연락은 사용자 승인 없이 전송하지 않는다.
+아래 법률·사이트 조사 설명은 원래 조사 당시 배경이며, 현재 법률이나 사이트 상태를 재검증한 결과는 아니다.
+
 > **법적 배경 참고**: 국내에서는 저작권법상 데이터베이스제작자의 권리(제91조~제98조), 부정경쟁방지법상 성과물 무단사용(제2조 제1호 차목), 각 사이트 이용약관이 쟁점이 될 수 있습니다. 일반적으로 **사실적 메타데이터의 소량 수집 + 원본 아웃링크 + 대체재가 아닌 보완재로 기능**하는 구조가 위험이 낮다고 평가되나, 이는 법률 자문이 아닙니다. 서비스를 공개적으로 운영하거나 수익화할 계획이라면 전문가 검토를 권합니다. 개인 학습·포트폴리오 목적이라면 **비공개 운영 + 소스 운영자 사전 동의 확보**가 가장 안전한 경로입니다.
 
 ---
@@ -295,6 +234,9 @@ class SourceAdapter(Protocol):
 > 예시: 실리카겔 『Machine Boy』 한정 컬러반은 김밥레코즈와 세컨드트랙에 각각 `listing`으로 존재하지만, 동일한 하나의 `release`로 병합됩니다. 반면 블랙반과 클리어반은 **서로 다른 `release`** 입니다.
 
 ### 4.2 스키마 (PostgreSQL DDL)
+
+이 DDL은 현재 모델의 설명용 요약이다. 실제 변경은 `migrations/versions/`의 Alembic 리비전으로 적용한다.
+테이블이 있다는 사실이 계정·크롤 적재·병합 기능의 구현을 뜻하지는 않는다. ORM의 onupdate 동작은 DDL 트리거가 아니다.
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -489,7 +431,7 @@ CREATE TABLE device_tokens (
     UNIQUE (platform, token)
 );
 
--- 발송 기록. **재발송을 구조적으로 막는 장치다** (ADR-0006 §5.2).
+-- 배송 행 중복을 막는 기록. 외부 푸시 전송과 DB 커밋의 원자성까지 보장하지는 않는다.
 CREATE TABLE notification_deliveries (
     id              BIGSERIAL PRIMARY KEY,
     event_id        BIGINT NOT NULL REFERENCES listing_events(id) ON DELETE CASCADE,
@@ -506,6 +448,8 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 ```
 
 ### 4.3 정규화 규칙 (`normalize()`)
+
+> 정규화 확장 계획이다. 현재 수동 입력은 admin.normalize_name의 NFKC·casefold·공백 축약만 사용하며 별칭/포맷 파서는 없다.
 
 정규화 함수는 병합 정확도를 좌우하는 핵심입니다. **결정론적(deterministic)** 이어야 하며, 단위 테스트로 전 규칙을 검증합니다.
 
@@ -536,6 +480,8 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 
 ### 4.4 개체 병합 알고리즘 (EntityResolver)
 
+> EntityResolver와 병합 CLI는 미구현이다. 아래 규칙은 보류된 설계안이며 실행 정책이 아니다.
+
 신뢰도 순으로 단계적 적용하며, **먼저 매칭되는 단계에서 종료**합니다.
 
 | 단계 | 조건 | 신뢰도 | 처리 |
@@ -565,7 +511,8 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 | `price_krw` 5% 이상 상승 | `PRICE_RISE` |
 | 3회 연속 크롤에서 URL 404/미발견 | `DELISTED` |
 
-`PREORDER_OPEN`은 **최우선 알림 등급**으로 즉시 발송합니다. 나머지는 배치 발송(사용자 설정에 따라 즉시/일 1회 요약)합니다.
+우선순위 큐·일일 요약은 미구현이다. 현재 M2는 모든 알림 대상 이벤트를 같은 60초 tick에서 처리하며,
+PENDING을 FAILED 재시도보다 먼저, 배송 생성 시각/ID 오름차순으로 최대 500건 처리한다.
 
 > 위 표는 **자동 수집(M3)** 이 붙은 뒤의 diff 규칙입니다. 현재(M2)는 운영자가 시각을
 > 직접 입력하므로 diff 엔진이 필요 없고, 아래 시각 기반 규칙만 동작합니다.
@@ -587,6 +534,9 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 
 #### 4.5.2 일정이 바뀌면 옛 이벤트를 무효화한다 (T-119)
 
+공개 취소 상태에서 바꾼 일정도 과거 이벤트를 무효화한다. 발매 자체를 승인하에 삭제하는 경우에는
+예외로 그 발매의 이벤트와 배송도 삭제한다 (§5.2-1).
+
 예약 시각이 17:00 → 19:00 으로 미뤄지면, 17:00 에서 나온 `PREORDER_OPENS_SOON` 과
 `PREORDER_OPEN` 은 **역할을 잃습니다.** 그대로 두면 두 가지가 동시에 깨집니다.
 
@@ -594,7 +544,7 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 2. 멱등성 판정이 "이미 보냈다"로 세어, **19:00 에 예약 시작 알림이 안 나갑니다** —
    이 제품이 유일하게 놓치면 안 되는 순간입니다
 
-그래서 `superseded_at` 에 표시합니다. **지우지 않습니다** — 그 행은 구독자에게 실제로
+그래서 `superseded_at` 에 표시합니다. **일정 수정 시에는 지우지 않습니다** — 그 행은 구독자에게 실제로
 보낸 기록이고 `notification_deliveries` 가 참조합니다. 보낸 사실은 취소되지 않습니다.
 
 | 바뀐 필드 | 무효화되는 이벤트 |
@@ -607,122 +557,110 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 같은 알림이 이유 없이 두 번 나갑니다. `SCHEDULE_ADDED` 는 무효화하지 않습니다 —
 일정이 등록되었다는 사실은 시각이 바뀌어도 그대로입니다.
 
-#### 4.5.3 피드는 발매당 최신 이벤트 하나만 싣는다 (T-118)
+#### 4.5.3 웹 피드·RSS·기기 알림의 구분
 
-같은 앨범에 `SCHEDULE_ADDED → PREORDER_OPENS_SOON → PREORDER_OPEN` 이 쌓이면 피드 상단
-세 줄이 전부 같은 앨범이 됩니다. 쓸모 있는 것은 마지막 하나뿐입니다.
-
-`/v1/feed` 와 `/v1/feed.rss` 가 **같은 질의**(`vinyl_api/feed_query.py`)를 씁니다.
-각자 들고 있으면 한쪽만 고쳐지고 다른 쪽이 조용히 어긋납니다.
-푸시도 `tag=release-<id>` 로 같은 발매의 알림을 하나로 묶으므로 세 곳이 같은 규칙을 씁니다.
+- `/v1/feed`: 이벤트 유무와 무관하게 공개 음반당 한 줄. SQL에서 정렬 후 limit을 적용한다.
+  기본 `sort=imminent`는 예약 시작(없으면 KST 자정 발매일) 기준 미래 임박순 → 지난 일정 최신순 → 미정 순이다.
+  `sort=recent`는 `updated_at` 내림차순이며 화면 라벨은 **최근 변경순**이다.
+- 웹 오른쪽에는 예약 시작 또는 발매일만 표시한다. `FeedItem.at`은 API 내부 이벤트/일정 시각이며
+  웹 표시의 기준이 아니다. 상태는 렌더링 시점에 예약 예정·진행 중·마감 또는 발매 예정·발매됨·일정 미정으로 계산한다.
+- RSS는 `latest_event_per_release()`로 공개 음반당 최신 비무효 이벤트를 최대 50개 선택한다.
+  `/v1/feed`도 최신 이벤트를 붙일 때 이 도우미를 쓰지만 음반 선택·정렬 쿼리는 별도다.
+- 푸시 `tag`는 `release-<id>-<event_type>`이다. 서로 다른 이벤트는 별개 알림으로 남고,
+  같은 이벤트 종류가 일정 변경으로 재발생하면 이전 알림을 교체한다.
 
 ---
 
 ## 5. API 설계
 
-### 5.1 규약
+### 5.1 현재 계약
 
-- 베이스 경로: `/v1`
-- 인증: `Authorization: Bearer <JWT>` (워치리스트·디바이스 엔드포인트만 필수)
-- 페이지네이션: **커서 기반** (`?cursor=<opaque>&limit=20`, 최대 100)
-- 응답: `snake_case` JSON. 타임스탬프는 ISO-8601 UTC (`2026-08-20T04:00:00Z`)
-- 오류: RFC 9457 Problem Details 형식
-- 캐싱: 목록 응답에 `ETag` 및 `Cache-Control: public, max-age=60`
+- 아래 표는 실제 라우터 기준이다. 정확한 스키마는 `make openapi`로 생성하는 [openapi.json](api/openapi.json)을 본다.
+- 공개 조회와 Web Push 구독에는 계정 인증이 없다. 운영자 JSON API는 `X-Admin-Key`를 요구한다.
+  `/admin` HTML 자체는 로그인 화면을 제공하며 OpenAPI에 포함하지 않는다.
+- `/v1/releases`만 커서 페이지네이션(`limit` 기본 20, 1~100)을 지원한다.
+  예약 시작 오름차순·NULL 마지막·ID 오름차순이며, 지난 일정을 자동 제외하지 않는다.
+- API 목록 `/v1/releases`, `/v1/feed`는 ETag와 60초 캐시 헤더를 제공한다.
+  RSS는 300초, ICS는 600초다. 웹의 API 조회와 같은 출처 중계 응답은 `no-store`다.
+- JSON은 snake_case, 시간은 타임존 포함 UTC, 가격은 원화 정수다. 오류는 RFC 9457 Problem Details를 사용한다.
+  웹 중계의 자체 오류는 `{detail: ...}` JSON일 수 있다.
 
-### 5.2 엔드포인트
+### 5.2 구현된 공개 엔드포인트
 
-| 메서드 | 경로 | 설명 |
+| 메서드 | 경로 | 현재 동작 |
 |---|---|---|
-| `GET` | `/v1/feed` | 통합 타임라인. 이벤트 기반 최신순 |
-| `GET` | `/v1/releases` | 발매 목록. 필터: `from`, `to`, `format`, `source`, `is_limited`, `stock_status`, `label`, `artist_id` |
-| `GET` | `/v1/releases/{id}` | 상세 + 소속 `listings` 배열 (판매처별 가격·재고 비교) |
-| `GET` | `/v1/search?q=` | 통합 검색 (아티스트·타이틀·레이블 대상, trigram) |
-| `GET` | `/v1/artists/{id}` | 아티스트 상세 + 발매 목록 |
-| `GET` | `/v1/events` | 이벤트 스트림. `?since=`, `?type=` |
-| `GET` | `/v1/sources` | 소스 목록 및 각 소스의 최종 수집 시각·상태 |
-| `POST` | `/v1/watchlist` | 워치리스트 추가 |
-| `GET` | `/v1/watchlist` | 워치리스트 조회 |
-| `DELETE` | `/v1/watchlist/{id}` | 워치리스트 삭제 |
-| `GET` | `/v1/push/public-key` | VAPID 공개키 (브라우저 구독에 필요, 인증 불필요) |
-| `POST` | `/v1/push/subscribe` | Web Push 구독 등록 (인증 불필요) |
-| `DELETE` | `/v1/push/subscribe` | Web Push 구독 해지 |
-| `POST` | `/v1/devices` | APNs 토큰 등록/갱신 (iOS 앱 도입 시) |
-| `POST` | `/v1/auth/apple` | Sign in with Apple 토큰 교환 |
-| `GET` | `/v1/feed.rss` | RSS 2.0 피드 (인증 불필요, 확산 채널) |
-| `GET` | `/v1/releases.ics` | 발매일 캘린더 (iCalendar) |
-| `GET` | `/healthz` | 헬스체크 (DB 연결 포함) |
-| `GET` | `/metrics` | Prometheus 메트릭 |
+| GET | `/v1/feed` | 공개 음반당 한 줄. `sort=imminent|recent`, `limit` 기본 50·최대 100, 커서 없음 |
+| GET | `/v1/releases` | 공개 목록. `cursor`, `limit`, `from`, `to`, `format`, `is_limited`. 날짜 필터는 발매일 기준 |
+| GET | `/v1/releases/{release_id}` | 공개 상세와 구매 `links`. `artist_name`은 문자열; `listings`·`recent_events` 없음 |
+| GET | `/v1/feed.rss` | 최신 이벤트 RSS 2.0 |
+| GET | `/v1/releases.ics` | 예약 시작 30분 블록과 30분 전 알람. `include_release_dates` 기본 true로 발매일 종일 일정 포함 |
+| GET | `/v1/push/public-key` | VAPID 공개키와 enabled |
+| POST | `/v1/push/subscribe` | 익명 구독 생성/갱신. 재활성화에도 정원 검사 |
+| DELETE | `/v1/push/subscribe` | endpoint 구독 비활성화, 이력 보존 |
+| GET | `/healthz` | DB 연결까지 확인, 성공 200·DB 실패 503 |
 
-### 5.2-1 운영자 API (수동 등록, [ADR-0005](adr/0005-manual-curation-first.md))
+FastAPI 기본 문서 `/docs`, `/redoc`, `/openapi.json`은 API 포트에서 제공한다.
+검색·아티스트·이벤트 스트림·소스 목록·워치리스트·계정·APNs 기기·`/metrics` 라우터는 **미구현**이다.
+Funnel 웹 도메인은 모든 API 경로를 공개하지 않는다. 푸시는 `/api/push/*`, RSS/ICS는 같은 `/v1/*` 경로로만 중계한다.
 
-인증은 `X-Admin-Key: <ADMIN_API_KEY>` 헤더 하나다. **계정 시스템을 쓰지 않는다** —
-사용자가 1명(운영자)인 단계에서 OAuth 를 만드는 것은 과설계다.
+### 5.2-1 운영자 API
 
-| 메서드 | 경로 | 설명 |
+| 메서드 | 경로 | 현재 동작 |
 |---|---|---|
-| `POST` | `/admin/releases` | 발매 일정 등록 (기본 `is_published=false` 초안) |
-| `PATCH` | `/admin/releases/{id}` | 일정 수정 |
-| `POST` | `/admin/releases/{id}/publish` | 공개 — 이 시점에 `SCHEDULE_ADDED` 이벤트 발생 |
-| `DELETE` | `/admin/releases/{id}` | 미공개 초안만 삭제 가능 |
-| `POST` | `/admin/releases/{id}/links` | 구매 링크 추가 |
-| `GET` | `/admin/releases` | 초안 포함 전체 조회 |
+| GET | `/admin` | 키 검증 전 본문을 감추는 로그인/등록/편집 화면 |
+| GET | `/admin/releases` | 초안 포함 전체 목록 |
+| GET | `/admin/releases/{release_id}` | 초안 포함 상세와 notes, can_delete |
+| POST | `/admin/releases` | 초안 생성, 구매처 함께 등록 |
+| PATCH | `/admin/releases/{release_id}` | 보낸 필드만 변경. links 생략은 유지, 배열은 전체 대체. 일정·구매처 원자적 저장 |
+| POST | `/admin/releases/{release_id}/publish` | 공개하고 최초 SCHEDULE_ADDED 생성 |
+| POST | `/admin/releases/{release_id}/unpublish` | 공개 취소, 이벤트 이력 유지 |
+| DELETE | `/admin/releases/{release_id}` | 비공개 음반 삭제. 과거 공개 이력 허용, 연결 listings가 있으면 거부. 이벤트·배송은 함께 삭제 |
+| POST | `/admin/releases/{release_id}/links` | 구매처 추가 |
+| DELETE | `/admin/releases/{release_id}/links/{link_id}` | 해당 음반의 구매처 삭제 |
 
-**공개 API 는 `is_published=true` 만 노출한다.** 초안이 새어 나가면 미공지 발매가 유출된다.
+`can_delete`는 비공개이고 연결된 listings가 없을 때 true다. 다른 FK 참조가 있으면 실제 삭제는 409일 수 있다.
+공개 API에는 notes가 없고 비공개 상세는 404다. 입력에서 공백/null 제목, null is_limited,
+타임존 없는 시각, 잘못된 예약 창·URL·원화 범위를 거부한다.
 
-> `POST /admin/releases` 요청 예시
-> ```jsonc
-> {
->   "title": "Machine Boy",
->   "artist_name": "실리카겔",
->   "label": "Magic Strawberry Sound",
->   "format": "2LP",
->   "variant": "Clear Vinyl",
->   "is_limited": true,
->   "release_date": "2026-09-12",
->   "preorder_opens_at": "2026-08-25T14:00:00+09:00",  // KST 로 받아 UTC 로 저장
->   "preorder_closes_at": "2026-09-05T23:59:59+09:00",
->   "cover_url": "https://...",
->   "notes": "300장 한정, 인스타 공지 확인",
->   "links": [
->     { "shop_name": "김밥레코즈", "source_id": "gimbab", "url": "https://...", "price_krw": 52000 }
->   ]
-> }
-> ```
+### 5.2-2 실행 시 보장 사항 (2026-09-10 점검)
 
-### 5.3 응답 예시
+- 이벤트 생성 백필 상한은 7일, 배송 대상은 이벤트 발생 후 48시간이다. 예약 임박은 시작 전 24시간 이내에서만 생성한다.
+- 배송은 활성 WEB 구독에만 계획하고 구독 이전 이벤트는 제외한다. 재활성화 시 구독 시작 시각을 갱신한다.
 
-```jsonc
-// GET /v1/releases/1042
+- 운영자 PATCH의 `links`는 생략하면 유지, 배열이면 전체 구매처 목록을 대체한다. 일정과 구매처는 한 트랜잭션에서 저장하고, 커밋 실패는 성공 응답으로 반환하지 않는다.
+- 실패한 푸시는 최대 3회 시도한다. 배송 생성 1분·5분 이후 재시도하며, 매 회차 공개 여부·구독 활성 여부·이벤트 무효화·48시간 발송 기한을 재검사한다. 스케줄러 프로세스 간 중복 실행은 DB 잠금으로 막는다.
+- 공개 취소 중 일정을 수정해도 이전 시각의 이벤트를 무효화한다. 재공개 후 새 시각의 이벤트가 생성될 수 있어야 한다.
+- 발매일 기준은 KST 자정이다. 예약 캘린더 블록은 날짜 경계를 넘어도 30분이며, 웹 캘린더는 API의 모든 페이지를 조회한다.
+- RSS·iCalendar는 공개 웹 도메인의 `/v1/feed.rss`, `/v1/releases.ics`를 통해 제공한다. 구독 주소는 실행 시 `PUBLIC_WEB_URL`을 사용한다.
+- 외부 푸시 전송 성공과 DB 커밋 사이에 프로세스가 종료되면 중복 전송 가능성이 남는다. `SENT`는 푸시 서비스 수락이며, 기기 표시 확인을 의미하지 않는다.
+
+### 5.3 공개 상세 응답 예시
+
+다음은 현재 `ReleaseOut` 구조의 설명용 예시이며 실제 DB 행을 의미하지 않는다.
+
+```json
 {
   "id": 1042,
   "title": "Machine Boy",
-  "artist": { "id": 88, "name_display": "실리카겔", "name_en": "Silica Gel" },
-  "label": "매직스트로베리사운드",
-  "catalog_no": "MSS-0142",
-  "barcode": "8809876543210",
+  "artist_name": "실리카겔",
+  "label": "Magic Strawberry Sound",
   "format": "2LP",
   "variant": "Clear Vinyl",
   "is_limited": true,
   "release_date": "2026-09-12",
-  "cover_url": "https://…",          // 원본 URL. 프록시하지 않음
-  "listings": [
+  "preorder_opens_at": "2026-09-11T04:00:00Z",
+  "preorder_closes_at": "2026-09-13T09:00:00Z",
+  "cover_url": null,
+  "curation": "MANUAL",
+  "is_published": true,
+  "links": [
     {
-      "source": { "id": "gimbab", "display_name": "김밥레코즈" },
-      "url": "https://…",
-      "price_krw": 58000,
-      "stock_status": "PREORDER",
-      "last_seen_at": "2026-08-20T03:58:12Z"
-    },
-    {
-      "source": { "id": "secondtrack", "display_name": "세컨드트랙" },
-      "url": "https://…",
-      "price_krw": 56000,
-      "stock_status": "SOLD_OUT",
-      "last_seen_at": "2026-08-20T03:59:04Z"
+      "id": 1,
+      "source_id": "gimbab",
+      "shop_name": "김밥레코즈",
+      "url": "https://example.com/release/1042",
+      "price_krw": 58000
     }
-  ],
-  "recent_events": [
-    { "event_type": "PREORDER_OPEN", "occurred_at": "2026-08-19T02:00:11Z", "source_id": "gimbab" }
   ]
 }
 ```
@@ -731,141 +669,98 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 
 ## 6. 리포지토리 구조
 
+아래는 현재 존재하는 주요 경로다. 파일명 중괄호는 같은 디렉터리의 파일들을 줄여 쓴 것이다.
+
+```text
+AGENTS.md / CLAUDE.md / README.md
+compose.yaml / compose.prod.yaml / Makefile / .env.example
+.vscode/{settings,extensions}.json
+apps/
+  api/
+    src/vinyl_api/
+      main.py / deps.py
+      routers/{admin,admin_ui,releases,feed,rss,calendar,push}.py
+      schemas/{release,push}.py
+      feed_query.py / serializers.py / pagination.py / caching.py
+      problems.py / request_limits.py / rate_limit.py / rss.py / icalendar.py
+    tests/                         # integration_runtime.py + test_*.py
+    pyproject.toml / Dockerfile
+  collector/
+    src/vinyl_collector/
+      cli.py / scheduler.py / push_sender.py / slack_alerter.py / fetcher.py / bridge.py
+    tests/fixtures/<source_id>/*.html
+    pyproject.toml / Dockerfile
+  web/
+    app/
+      page.tsx / calendar/page.tsx / releases/[id]/page.tsx
+      subscribe/{page,PushToggle}.tsx / layout.tsx / globals.css / manifest.ts
+      api/push/{public-key,subscribe}/route.ts
+      v1/{feed.rss,releases.ics}/route.ts
+    lib/{api,proxy,push,push-request,feed-display,calendar,format}.ts
+    public/sw.js / public/*.png
+    tests/*.test.mjs
+    package.json / package-lock.json / next.config.ts / Dockerfile
+packages/core/
+  src/vinyl_core/
+    models/{base,artist,release,listing,source,user}.py
+    adapters/{base,registry,gimbab,secondtrack,poclanos}.py
+    db.py / settings.py / seed.py / enums.py / logging.py / testing.py
+    schedule_events.py / notifications.py / alerts.py
+  tests/ / pyproject.toml
+migrations/versions/ / alembic.ini
+infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
+docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
+docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
+backups/                           # ignored runtime artifacts
+venv/                              # ignored local Python environment
 ```
-vinyl-radar/
-├─ CLAUDE.md                        # 에이전트용 상시 컨텍스트 (§0 요약 + 관례)
-├─ README.md
-├─ compose.yaml                     # 로컬 개발 스택
-├─ compose.prod.yaml
-├─ Makefile                         # make up / test / lint / migrate / seed
-├─ .env.example
-├─ .vscode/
-│  ├─ settings.json
-│  ├─ launch.json
-│  ├─ tasks.json
-│  └─ extensions.json
-├─ .devcontainer/
-│  └─ devcontainer.json
-├─ apps/
-│  ├─ api/                          # FastAPI
-│  │  ├─ src/vinyl_api/
-│  │  │  ├─ main.py
-│  │  │  ├─ deps.py
-│  │  │  ├─ routers/{feed,releases,calendar,rss,push,admin,admin_ui}.py
-│  │  │  ├─ feed_query.py           # 발매당 최신 이벤트 하나 — feed 와 rss 가 공유
-│  │  │  ├─ icalendar.py            # RFC 5545 생성 (직접 구현)
-│  │  │  ├─ rss.py                  # RSS 2.0 + RFC 822 생성 (직접 구현)
-│  │  │  ├─ problems.py             # RFC 9457 오류 응답
-│  │  │  ├─ pagination.py           # keyset 커서
-│  │  │  ├─ caching.py              # ETag / Cache-Control
-│  │  │  ├─ serializers.py
-│  │  │  ├─ schemas/
-│  │  │  └─ services/
-│  │  ├─ tests/
-│  │  ├─ pyproject.toml
-│  │  └─ Dockerfile
-│  ├─ collector/                    # 수집기 + 스케줄러
-│  │  ├─ src/vinyl_collector/
-│  │  │  ├─ scheduler.py
-│  │  │  ├─ fetcher.py              # httpx, rate limit, robots, 조건부 요청
-│  │  │  ├─ pipeline.py
-│  │  │  └─ cli.py                  # `collector run --source gimbab --dry-run`
-│  │  ├─ tests/
-│  │  │  └─ fixtures/<source_id>/*.html
-│  │  ├─ pyproject.toml
-│  │  └─ Dockerfile
-│  ├─ web/                          # Next.js 16 (PWA)
-│  │  ├─ app/
-│  │  │  ├─ page.tsx                # 피드
-│  │  │  ├─ manifest.ts             # 웹 앱 매니페스트 (홈 화면 추가 = iOS 푸시의 전제)
-│  │  │  ├─ api/push/               # 같은 출처 프록시 (ADR-0007)
-│  │  │  ├─ subscribe/PushToggle.tsx  # 푸시 켜기/끄기 (클라이언트 컴포넌트)
-│  │  │  ├─ releases/[id]/page.tsx
-│  │  │  ├─ search/page.tsx
-│  │  │  └─ artists/[id]/page.tsx
-│  │  ├─ public/
-│  │  │  ├─ sw.js                   # 서비스워커 — 푸시 수신·알림 클릭
-│  │  │  └─ icon-*.png              # PWA 아이콘 (192/512/maskable/apple-touch)
-│  │  ├─ lib/api.ts                 # OpenAPI 생성 클라이언트 (서버 컴포넌트 전용)
-│  │  ├─ lib/push.ts                # 브라우저 구독
-│  │  ├─ lib/proxy.ts               # API 전달
-│  │  ├─ components/
-│  │  └─ Dockerfile
-│  └─ ios/                          # Xcode 프로젝트
-│     └─ VinylRadar/
-│        ├─ VinylRadarApp.swift
-│        ├─ Features/{Feed,Search,ReleaseDetail,Watchlist,Settings}/
-│        ├─ Core/{APIClient,Models,DesignSystem}/
-│        └─ Notifications/
-├─ packages/
-│  └─ core/                         # API·collector 공용 Python 패키지
-│     ├─ src/vinyl_core/
-│     │  ├─ adapters/
-│     │  │  ├─ base.py
-│     │  │  ├─ gimbab.py
-│     │  │  ├─ secondtrack.py
-│     │  │  ├─ poclanos.py
-│     │  │  └─ registry.py          # 어댑터 자동 등록
-│     │  ├─ models/                 # SQLAlchemy ORM
-│     │  ├─ normalize.py
-│     │  ├─ resolver.py
-│     │  ├─ events.py
-│     │  ├─ testing.py                # 엣지 케이스 카탈로그 (전 출력 경로 공용)
-│     │  └─ aliases.yaml            # 아티스트 별칭 사전
-│     ├─ tests/
-│     └─ pyproject.toml
-├─ migrations/                      # Alembic
-├─ backups/                        # pg_dump 산출물 (git 에 커밋하지 않음)
-├─ infra/
-│  ├─ nginx/
-│  ├─ prometheus/
-│  └─ deploy.sh
-├─ docs/
-│  ├─ BLUEPRINT.ko.md               # 본 문서
-│  ├─ BLUEPRINT.en.md
-│  ├─ adapters/<source_id>.md       # 소스별 조사 기록
-│  ├─ adr/NNNN-*.md
-│  └─ api/openapi.json              # CI에서 자동 생성
-└─ .github/workflows/
-   ├─ ci.yml
-   ├─ deploy.yml
-   └─ parser-canary.yml             # 실사이트 대상 일 1회 파서 검증
-```
+
+**계획 경로**: `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector의 `pipeline.py`,
+core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
+`infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.github/workflows/`, `.devcontainer/`는 현재 없다.
+이 경로들은 향후 작업을 위한 예약이며, 이 표만으로 구현·활성화하지 않는다.
 
 ---
 
 ## 7. 웹 프론트엔드
 
-### 7.1 화면 구성
+### 7.1 구현된 화면
 
-| 화면 | 경로 | 핵심 요소 |
+| 화면 | 경로 | 현재 내용 |
 |---|---|---|
-| 피드 | `/` | 이벤트 타임라인. `PREORDER_OPEN` 뱃지 강조. 소스 필터 칩 |
-| 발매 캘린더 | `/calendar` | 월간 그리드. 발매 예정일 기준 |
-| 상세 | `/releases/[id]` | 커버·메타데이터·판매처별 가격 비교 테이블·아웃링크 버튼 |
-| 검색 | `/search` | 인크리멘털 검색. 아티스트/레이블/포맷 패싯 |
-| 아티스트 | `/artists/[id]` | 디스코그래피 + 워치 버튼 |
-| 워치리스트 | `/watchlist` | 로그인 필요 |
+| 피드 | `/` | 공개 음반당 한 줄, 최근 변경순/발매 임박순, 예약/발매 상태와 시작 시각, 구매 링크 |
+| 캘린더 | `/calendar?month=YYYY-MM` | KST 기준 예약 시작·발매일, 모든 API 페이지 조회 |
+| 상세 | `/releases/[id]` | 제목·아티스트·포맷·예약 창·발매일·구매처 링크 |
+| 구독 | `/subscribe` | Web Push 켜기/끄기, 공개 RSS·ICS 주소 |
 
-### 7.2 디자인 방향
+검색·아티스트·워치리스트 화면은 없다. `cover_url`은 API 필드로 지원하지만 현재 웹에서 커버 이미지를 렌더링하지 않는다.
 
-- **정보 밀도 우선.** 수집가는 한 화면에서 많은 항목을 스캔합니다. 카드 간 여백을 과하게 두지 않습니다.
-- **상태의 시각적 우선순위**: `예약오픈` > `재입고` > `신규` > `가격변동`. 색상보다 **레이블+아이콘 조합**을 사용하여 색각 이상 사용자를 배려합니다.
-- 다크 모드 기본 지원. 커버 아트가 주인공이므로 중성적 배경을 사용합니다.
-- 이미지는 `next/image`의 `remotePatterns`로 원본 도메인을 허용하되 **자체 저장하지 않습니다.**
+### 7.2 표시와 PWA
 
-### 7.3 API 클라이언트 생성
+- 상태는 텍스트 배지로 표시한다. 정보 밀도를 유지하고 시스템 다크 모드를 지원한다.
+- 피드·캘린더·상세·구독 화면은 동적으로 렌더링한다. 피드 상태는 페이지 렌더링 시 계산하며 실시간 자동 갱신 타이머는 없다.
+- `manifest.ts`, PWA 아이콘, `sw.js`가 있다. 서비스워커는 설치 시 활성화하고 푸시·클릭·구독 교체를 처리하며, 오프라인 콘텐츠 캐시는 없다.
+- iPhone 테스트 흐름은 Safari에서 홈 화면에 추가한 앱으로 실행해 권한을 허용하는 것이다. 실제 수신·표시는 실기기에서 확인한다.
 
-FastAPI가 생성한 `openapi.json`으로부터 타입을 자동 생성합니다. 수기 타입 정의를 금지합니다.
+### 7.3 API 클라이언트와 환경 변수
 
-```bash
-# apps/web
-npx openapi-typescript ../../docs/api/openapi.json -o lib/api-types.ts
-```
+`apps/web/lib/api.ts`는 서버용 fetch 도우미와 **수기 TypeScript 타입**이다.
+생성 클라이언트·`api-types.ts`·openapi-typescript는 없으며 생성 도입은 향후 작업이다.
+`make openapi`는 API 계약 스냅샷만 생성한다.
+
+- `API_BASE_URL`: 웹 서버가 사용하는 내부 API 주소 (Compose에서는 `http://api:8000`).
+- `PUBLIC_WEB_URL`: api·collector·web이 링크를 만들 때 사용하는 브라우저 접근 가능한 공개 웹 주소.
+  `/subscribe`는 실행 시 이 값을 읽는다. `PUBLIC_API_URL`은 현재 사용하지 않는다.
+- 브라우저와 서비스워커는 같은 출처의 푸시 경로를 사용한다. API에 CORS 미들웨어는 없다.
+- 각 API 요청은 10초 제한·no-store를 적용한다. 공개 RSS·ICS는 고정 경로 중계로 제공한다.
 
 ---
 
-## 8. iOS 애플리케이션
+## 8. iOS 네이티브 애플리케이션 (M5 이후 계획)
+
+> 이 절은 미구현 네이티브 앱 설계안이다. `apps/ios`·Swift 모델·APNs·JWT·SwiftData는 없다.
+> 현재 iPhone 알림은 PWA Web Push이며, 네이티브 앱이나 Apple 로그인은 현재 서비스의 필수 조건이 아니다.
+> 아래 플랫폼·심사 관련 비교는 당시 계획 배경이며, 네이티브 착수 시 다시 확인한다.
 
 ### 8.1 구현 방식 선택 — 검토와 권고
 
@@ -878,7 +773,7 @@ npx openapi-typescript ../../docs/api/openapi.json -o lib/api-types.ts
 **권고**: **B안(네이티브 SwiftUI)** 을 채택합니다. 근거는 다음과 같습니다.
 
 1. 사용자께서 명시한 목표가 “**더 사용자 친화적인** iOS 앱”입니다. 웹뷰 래퍼는 정의상 웹보다 친화적일 수 없습니다.
-2. 이 서비스의 핵심 가치는 **푸시 알림**(예약판매 오픈 즉시 통지)입니다. 이는 네이티브 통합이 필수적입니다.
+2. 이 서비스의 핵심 가치는 **푸시 알림**(예약판매 오픈 즉시 통지)입니다. 현재는 Web Push로 제공하며, 네이티브 통합은 앱 고유 기능을 위한 향후 선택입니다.
 3. API 우선 설계이므로 웹과 iOS가 동일한 계약을 공유하며, 웹 작업이 낭비되지 않습니다. “웹을 만들고 이를 활용”한다는 의도는 **UI 코드 재사용이 아니라 API·도메인 모델 재사용**으로 달성됩니다.
 
 다만 반대 논거도 명시합니다. 학습·포트폴리오 목적에서 iOS를 빠르게 배포해 보는 것이 우선이라면, A안으로 먼저 출시한 뒤 화면 단위로 네이티브 전환하는 경로도 합리적입니다. 이 경우 최소한 **푸시 알림·설정 화면·탭바는 네이티브로 구현**해야 4.2 리스크를 낮출 수 있습니다.
@@ -949,115 +844,116 @@ VSCode를 주 IDE로 사용하시되, iOS 부분에는 제약이 있음을 명�
 
 ## 9. 개발 환경 및 운영
 
-### 9.1 로컬 실행 (Quick Start)
+### 9.1 현재 실행 방법
+
+Docker 엔진과 Compose가 필요하다. macOS 테스트 환경은 colima를 사용한다.
 
 ```bash
-git clone <repo> && cd vinyl-radar
-cp .env.example .env
-
-make up          # postgres + api + collector + web 컨테이너 기동
-make migrate     # Alembic 마이그레이션 적용
-make seed        # sources 테이블 시드 + 아티스트 별칭 로드
-
-# 단일 소스 수동 수집 (DB 쓰기 없이 파싱 결과만 출력)
-docker compose exec collector collector run --source gimbab --dry-run --limit 5
-
-# 접속
-# API 문서: http://localhost:8000/docs
-# 웹:       http://localhost:3000
+# 새 환경에서만 실행; 기존 .env를 덮어쓰지 않는다.
+cp -n .env.example .env
+# .env의 ADMIN_API_KEY를 설정한다. 공개 테스트에서는 32자 이상의 비밀 키를 사용한다.
+make up          # 개발 웹 + API + collector + PostgreSQL
+make migrate     # 최초 실행 또는 새 DB 마이그레이션이 있을 때
+make seed        # sources만 시드; 별칭은 미구현
 ```
 
-### 9.2 `.vscode/extensions.json` 권장 확장
+`make prod`는 `compose.yaml`과 `compose.prod.yaml`을 합쳐 빌드·기동한다.
+현재는 Mac mini에서 테스트를 위해 이 모드를 사용하며 EC2 배포 명령이 아니다.
 
-```jsonc
-{
-  "recommendations": [
-    "ms-python.python",
-    "charliermarsh.ruff",
-    "ms-python.mypy-type-checker",
-    "ms-azuretools.vscode-docker",
-    "ms-vscode-remote.remote-containers",
-    "bradlc.vscode-tailwindcss",
-    "dbaeumer.vscode-eslint",
-    "esbenp.prettier-vscode",
-    "humao.rest-client",
-    "mtxr.sqltools",
-    "sswg.swift-lang",
-    "yzhang.markdown-all-in-one"
-  ]
-}
-```
-
-### 9.3 테스트 전략
-
-| 계층 | 방식 | 도구 |
+| 항목 | 개발 `make up` | 공개 테스트 `make prod` |
 |---|---|---|
-| 어댑터 파싱 | **저장된 HTML fixture** 기반 골든 테스트. 실제 네트워크 요청 금지 | pytest + 로컬 fixture |
-| 정규화 | 테이블 주도 단위 테스트 (입력 → 기대 출력 쌍 30건 이상) | pytest.mark.parametrize |
-| 병합 로직 | 정답 라벨링된 100쌍으로 precision/recall 측정. **회귀 시 CI 실패** | pytest + 메트릭 임계값 |
-| API | 실제 PostgreSQL 컨테이너 대상 통합 테스트 | pytest + testcontainers |
-| 파서 카나리 | **일 1회 실사이트 1건 요청** 후 필수 필드 존재 검증. 실패 시 GitHub Issue 자동 생성 | 별도 워크플로 |
+| 웹 | next dev, 소스 마운트 | 빌드 이미지 + next start, 웹 마운트 제거 |
+| API | 소스 마운트 + uvicorn --reload | 동일한 마운트/--reload 유지, ENVIRONMENT=production |
+| collector | 소스 마운트, scheduler 실행, 자동 리로드 없음 | 동일, ENVIRONMENT=production |
+| DB·포트 | postgres_data 볼륨, 5432/8000/3000 loopback 바인딩 | 동일 |
 
-파서 카나리는 “사이트 개편으로 조용히 0건이 수집되는” 최악의 실패 모드를 방지하는 핵심 장치입니다. 반드시 구현하십시오.
+API Python 편집은 리로드된다. collector Python 편집은 `docker compose restart collector`가 필요하다.
+production 웹 편집과 의존성 변경은 재빌드한다. `.env`/Compose 환경 변수 변경은 `make prod` 또는
+동일 오버레이의 `up -d`로 컨테이너를 재생성해야 한다. `restart`만으로 환경 변수를 바꾸지 못한다.
+
+| 환경 변수 | 소비자·용도 |
+|---|---|
+| DATABASE_URL | api·collector의 DB 연결 |
+| ADMIN_API_KEY | API 인증, api·collector production 설정 검증 |
+| API_BASE_URL | 웹 내부 API 호출 (Compose에서 http://api:8000) |
+| PUBLIC_WEB_URL | api·collector·web의 공개 링크와 구독 주소 |
+| VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT | api 구독 가능 여부, collector Web Push 전송 |
+| CRAWLER_* | collector 수동 수집 설정; 자동 수집을 활성화하지 않음 |
+| ENV_BACKUP_DIR / ENV_BACKUP_KEEP | 호스트의 .env 백업 스크립트 |
+
+`ENVIRONMENT=local`에서는 개발 기본 관리자 키를 허용하되 빈 키는 거부한다. staging/production은
+기본 키 또는 32자 미만 키를 거부한다. VAPID 설정이 부족하면 public-key의 enabled=false,
+구독 POST는 503이며 발송기는 FAILED를 반환한다. 이를 성공/no-op로 기록하지 않는다.
+
+### 9.2 로컬 도구
+
+`.vscode/settings.json`은 `venv/bin/python`과 Python 테스트 디렉터리를 지정한다.
+권장 확장은 `.vscode/extensions.json`에 있다. launch.json·tasks.json·devcontainer는 없다.
+Python은 `make install`, 웹 의존성은 `apps/web`에서 `npm ci`로 준비한다.
+
+### 9.3 실제 검증 경로
+
+```bash
+make lint
+make test
+make openapi
+cd apps/web
+npm run lint
+node --test tests/*.test.mjs
+npm run build
+```
+
+Python 기본 테스트는 fixture·mock·TestClient·SQL 질의 검증 중심이다. testcontainers 기반 자동 DB 기동은 없다.
+`apps/api/tests/integration_runtime.py`는 **명시적으로 실행하는** PostgreSQL 통합 검증이다.
+가짜 발송기와 독립 스키마를 만들고 전체 롤백하며, 실제 기기로 보내지 않는다. 일반 `make test`에는 포함하지 않는다.
+수신 표시 확인이 필요한 `collector test-push`는 실제 발송이며 사용자 승인이 필요하다.
+
+CI·파서 카나리·커버리지 게이트는 미구현이다. `docs/runtime-review.md`의 테스트 수치는 2026-09-10의 기록이며
+매 실행의 최신 결과를 대신하지 않는다. 문서 수정만으로 서비스를 기동하거나 실제 데이터로 삭제 시험을 하지 않는다.
 
 ### 9.3-1 백업과 복구
 
-**볼륨은 "실수로 안 지워진다"를 보장할 뿐, 유실을 막지 못합니다.**
-디스크 고장·인스턴스 삭제·잘못된 마이그레이션·`DROP TABLE` 은 볼륨으로 막을 수 없습니다.
+- `make backup`: pg_dump → gzip을 `backups/`에 저장한다. 파이프 실패를 감지하고 실패 파일을 제거한다.
+- `make restore FILE=...`: 사용자 확인 후 압축 해제에 성공한 SQL만 psql 단일 트랜잭션으로 적용한다.
+  SQL 오류 시 중단한다. 기존 데이터를 덮어쓰므로 승인과 사전 백업이 필요하다. 시험 복구는 별도 DB에서 한다.
+- `make backup-prune`: 최근 DB 백업 30개를 남긴다. `infra/vinyl-radar-backup.sh`는 DB 실행 시
+  backup → prune → .env 백업을 실행한다. DB가 꺼져 있으면 건너뛰며 .env 백업 실패는 경고 로그로 남긴다.
+- `.env` 암호화는 `infra/env-backup.sh`, 복구는 `infra/env-restore.sh`다. `ENV_BACKUP_DIR` 기본값은
+  **프로젝트 내부** backups/env이며 디스크 밖 저장은 별도 설정해야 한다. keep 기본 10개, 키체인 암호 설정은 `make backup-env-setup`이다.
+- 저장소에는 LaunchAgent plist나 등록 명령이 없다. 호스트에서의 자동 실행 등록 여부·주기는 별도로 확인한다.
+- `down`은 볼륨을 유지하지만 `down -v`·볼륨 삭제·SQL 삭제·디스크 고장을 막지 못한다. 볼륨은 백업이 아니다.
 
-```bash
-make backup                          # backups/ 에 타임스탬프 덤프 생성
-make restore FILE=backups/xxx.sql.gz # 복구 (기존 데이터를 덮어씀)
+### 9.3-2 Funnel 공개 테스트
+
+```text
+인터넷 → Tailscale Funnel → Mac mini의 127.0.0.1:3000
+                             → colima/Docker의 web → api:8000 → postgres:5432
 ```
 
-| 항목 | 내용 |
-|---|---|
-| 방식 | `pg_dump --clean --if-exists` → gzip. 복구는 `psql` 로 그대로 적용 |
-| 주기 | 실서비스에서는 **일 1회 이상** (cron) |
-| 보관 위치 | **반드시 서버 밖**(S3 등)에도 둔다. 같은 디스크에만 두면 디스크와 함께 죽는다 |
-| 검증 | 복구를 실제로 해 보지 않은 백업은 백업이 아니다. 주기적으로 시험 복구할 것 |
+현재 대화에서 사용한 주소는 `https://jaehyeonui-macmini.tail598a5f.ts.net`이다.
+실제 주소·터널 등록 상태는 `tailscale funnel status`로 확인한다. 코드와 DB는 Mac mini에 있다.
+웹만 공개하고 API/관리자/DB 포트는 loopback에 둔다. 웹에 범용 API 프록시를 추가하지 않는다.
 
-> ⚠️ **`docker compose down -v` 의 `-v` 는 볼륨을 삭제합니다.** 배포 시 쓰는
-> `docker compose down` 은 컨테이너만 정리하므로 데이터가 남습니다. 둘을 혼동하지 마십시오.
+재부팅 후 `colima start`와 `make prod`로 기동할 수 있다. `infra/vinyl-radar-start.sh`도
+colima 확인 → Compose up → API health 확인을 수행하지만 이미지를 빌드하지 않는다.
+Docker의 restart 정책은 Docker 엔진이 떠 있을 때만 유효하며, 호스트 로그인·데몬 자동 기동을 보장하지 않는다.
 
-### 9.4 관측성
+### 9.4 관측성과 알림 한계
 
-| 항목 | 구현 |
-|---|---|
-| 로그 | `structlog` JSON 출력. `source_id`, `url`, `trace_id` 필수 필드 |
-| 메트릭 | `collector_items_parsed_total{source}`, `collector_parse_errors_total{source}`, `collector_run_duration_seconds{source}`, `collector_last_success_timestamp{source}` |
-| 알람 조건 | ① 특정 소스의 `last_success_timestamp`가 크론 간격의 3배 초과 ② `parse_errors / items_parsed > 0.1` ③ 24시간 내 `NEW_LISTING` 이벤트 0건 |
-| 오류 추적 | Sentry (파싱 예외에 소스별 태그 부착) |
+structlog 로그, /healthz의 DB 연결 검사, scheduler.tick, notifications.dispatched,
+push.retry_exhausted가 현재 관측 수단이다. 공통 trace_id·Prometheus 메트릭·Sentry·외부 운영자 알림은 없다.
+익명 구독에는 URL/키 검증·본문 크기/시간 상한·프로세스 메모리 속도 제한·DB 정원 검사와
+웹 동일 출처 검사가 있다 ([보안 점검](security-review.md)). 속도 제한은 다중 API 프로세스 간 공유되지 않는다.
 
-### 9.5 CI/CD
+### 9.5 CI/CD 상태
 
-```yaml
-# .github/workflows/ci.yml (요약)
-jobs:
-  quality:
-    - ruff check / ruff format --check
-    - mypy packages/core apps/api apps/collector
-    - pytest --cov (커버리지 임계 70%)
-    - openapi.json 생성 후 커밋본과 diff → 불일치 시 실패
-  web:
-    - pnpm lint / tsc --noEmit / next build
-  image:
-    - buildx로 linux/arm64 이미지 빌드 → GHCR push (main 브랜치만)
-```
+`.github/workflows/`와 `infra/deploy.sh`가 없으므로 자동 CI, GHCR push, SSH 배포와 자동 롤백도 없다.
+현재는 로컬 Make/npm 검증과 Compose 빌드·기동을 사용한다. CI/클라우드 이관은 향후 별도 작업이다.
 
-배포는 `deploy.yml`에서 SSH로 EC2 접속 → `docker compose pull && up -d` → `/healthz` 검증 → 실패 시 이전 태그로 롤백합니다.
+### 9.6 비용과 운영 범위
 
-### 9.6 예상 운영 비용 (월, USD)
-
-| 항목 | 비용 |
-|---|---|
-| EC2 t4g.small (1년 약정) | 약 $9 |
-| EBS 20GB | 약 $2 |
-| 도메인 | 약 $1 |
-| Apple Developer Program | 약 $8 (연 $99 분할) |
-| **합계** | **약 $20** |
-
-초기에는 Oracle Cloud Always Free(ARM 4 OCPU/24GB)로 $0 운영도 가능합니다.
+현재 구현은 소유한 Mac mini의 공개 테스트다. 과거 EC2/Apple 요금표는 현재 청구액이나 검증된 견적이 아니다.
+클라우드·네이티브 앱 도입 시 필요한 자원과 당시 요금으로 다시 산정한다.
 
 ---
 
@@ -1065,11 +961,16 @@ jobs:
 
 각 태스크는 **독립적으로 완료 판정 가능**하도록 작성되었습니다. 에이전트는 태스크 ID를 명시하며 진행합니다.
 
+> 상태 기준(2026-09-11): M1 경로와 M2의 시각 이벤트·Web Push가 구현되어 있다.
+> T-116은 재시도/404·410 비활성화까지만 구현되어 **외부 운영자 알림은 남아 있다**.
+> M3 이후는 계획이며 완료 조건 표가 구현 완료를 뜻하지 않는다. 기존 T-008~T-011 행은 원래 M0 계획의 기록이다.
+> T-008/T-009는 미구현 보류, 공개 API/웹 역할은 T-105/T-110으로 구현했다. T-012 CI는 여전히 미구현이다.
+
 ### M0 — Walking Skeleton (완료)
 
 > 목표였던 "1개 소스 → DB → API → 화면"은 [ADR-0005](adr/0005-manual-curation-first.md) 로
 > 방향이 바뀌어 **수집 부품까지 완료한 상태로 마감**한다.
-> T-008~T-012 는 M3(자동 수집 재개)로 이동한다.
+> 수집 파이프라인 관련 작업은 M3로 미뤘고, 공개 API/웹은 M1에서 수동 일정용으로 구현했다.
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|
@@ -1084,7 +985,7 @@ jobs:
 | T-009 | `pipeline.py`: RawItem → listings upsert (병합 없이 release 1:1 생성) | `collector run --source gimbab` 후 DB에 행 적재 |
 | T-010 | `GET /v1/releases` (커서 페이지네이션) | OpenAPI 문서 노출, 실데이터 반환 |
 | T-011 | Next.js 피드 화면 (SSR, 필터 없음) | `localhost:3000` 에서 목록 렌더링 |
-| **M0 완료 기준** | 김밥레코즈 상품이 수집되어 웹 화면에 표시된다 | |
+| **M0 마감 범위** | 스캐폴딩·스키마·수집 부품까지 완료. 수집 → DB → 웹 연결은 보류 | |
 
 ### M1 — 수동 등록 → 공개 피드 ([ADR-0005](adr/0005-manual-curation-first.md))
 
@@ -1111,17 +1012,23 @@ jobs:
 |---|---|---|
 | T-111 | APScheduler 도입 + `preorder_opens_at` 감시 | 컨테이너 상주, 1분 해상도 로그 확인 |
 | T-112 | `PREORDER_OPENS_SOON`(24h 전) / `PREORDER_OPEN` / `RELEASED` 생성 | 시각 조작 테스트로 3종 전부 검증 |
-| T-113 | 발송 멱등성 (동일 이벤트 재발송 금지) | 스케줄러 재기동 후 중복 발송 0건 |
+| T-113 | 이벤트 생성 멱등성 | 순차 재실행 시 같은 유효 이벤트가 중복 생성되지 않음 |
 | T-114 | **Web Push 구독** (VAPID 키, 구독/해지 API, 스키마 확장) — [ADR-0006](adr/0006-web-push-first.md) | 브라우저가 구독하고 DB 에 저장됨 |
-| T-115 | 발송기 + **멱등 배송** (`notification_deliveries`) | 스케줄러 재기동 후 중복 발송 0건 |
-| T-116 | 재시도 + 만료 구독 정리 + 무음 실패 알림 | 의도적 실패 시 운영자 알림, 410 이면 구독 비활성화 |
+| T-115 | 배송 기록·중복 처리 방지 | 커밋된 SENT 재처리 없음. 전송/커밋 사이 장애의 중복 가능성은 §5.2-2 참조 |
+| T-116 | 재시도 + 만료 구독 정리 + **Slack 운영자 알림** | 의도적 실패 시 Slack 수신, 410 이면 구독 비활성화 |
 | T-117 | 웹 구독 UI (PWA 매니페스트 + 서비스워커) — [ADR-0007](adr/0007-same-origin-push-proxy.md) | 실제 기기에서 알림 수신 |
 | T-118 | 피드 접기(발매당 최신 1건) + `SCHEDULE_CHANGED` (§4.5.1, §4.5.3) | 같은 앨범이 피드에 한 줄만, 일정 수정 시 알림 발송 |
 | T-119 | 일정 변동 시 옛 이벤트 무효화·재발송 (§4.5.2) | 예약 시각을 미루면 **새 시각에** 예약 시작 알림이 다시 나감 |
+| T-120 | 상시 운영 준비 (포트 바인딩·운영자 키·production 빌드·백업 자동화) | 재부팅 후 수동 2줄로 복구, `.env` 암호화 백업이 디스크 밖에 |
+| T-130 | 공개 노출 대비 보안 강화 ([`docs/security-review.md`](security-review.md)) | 인증 없이 SSRF·500·XSS 를 만들 수 없음 |
+| T-131 | 알림 `tag` 를 이벤트 단위로 | 서로 다른 알림이 기기 목록에서 서로를 지우지 않음 |
+| T-132 | 피드 `sort=recent` 를 `updated_at` 기준으로 | 일정을 수정하면 맨 위로 올라옴 |
+| T-133 | 초안 삭제 허용 (공개 취소 → 삭제) | SQL 없이 화면에서 지울 수 있고, 공개 중인 것은 막힘 |
+| T-134 | 관리 화면 로그인 | 키 확인 전에는 본문이 열리지 않고, 이후 재입력 불필요 |
 
 > **알림 채널은 Web Push 우선** ([ADR-0006](adr/0006-web-push-first.md)). 이메일은 만들지 않는다.
 > §8.3 의 APNs 는 폐기가 아니라 **iOS 앱 배포 시점으로 미룬 것**이다.
-> T-113 이 검증한 것은 **이벤트 생성** 멱등성이며, **발송** 멱등성은 T-115 에서 완료된다.
+> T-113 이 검증한 것은 **이벤트 생성** 멱등성이며, **발송** 중복 방지는 T-115의 배송 기록과 잠금으로 수행하되, 전송/커밋 사이의 장애까지 exactly-once를 보장하지 않는다.
 
 ### M3 — 자동 수집 재개
 
@@ -1166,7 +1073,7 @@ jobs:
 | T-038 | WatchlistView | CRUD 동작 |
 | T-039 | SwiftData 오프라인 캐시 | 기내 모드에서 최근 피드 표시 |
 
-### M6 — 푸시 알림
+### M6 — 네이티브 APNs·확장 푸시 (현재 Web Push와 별도)
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|
@@ -1188,13 +1095,16 @@ jobs:
 
 ## 11. 위험 요소 및 대응
 
+현재 대응과 향후 계획을 구분한다. 파서 카나리·소스 DB 비활성화·자동 복구·외부 경보는 아직 없으며,
+아래 미래 대응을 이미 운영 중인 장치로 해석하지 않는다.
+
 | 위험 | 영향 | 가능성 | 대응 |
 |---|---|---|---|
 | 소스 사이트 개편으로 파서 파손 | 상 | 상 | 파서 카나리(T-018) + fixture 골든 테스트 + 소스별 알람 |
 | 소스 운영자의 차단 요청 | 상 | 중 | 사전 고지·제휴 문의(§3.4). `sources.is_enabled` 플래그로 즉시 중단 가능한 구조 |
 | 잘못된 병합으로 인한 신뢰 하락 | 중 | 중 | 정밀도 우선 정책, `merge_candidates` 보류 큐, 되돌릴 수 있는 병합 |
 | 봇 차단(Cloudflare 등) | 중 | 중 | 대상 소스 재검토. **우회 시도하지 않고 해당 소스 제외** |
-| 알림 지연으로 한정반 놓침 | 상 | 중 | 예약판매 감지 소스는 크론 간격 5~10분으로 단축, 우선 큐 분리 |
+| 알림 지연으로 한정반 놓침 | 상 | 중 | 현재 수동 일정은 60초 tick·제한된 재시도. 별도 우선순위 큐는 미구현 |
 | iOS 심사 반려 | 중 | 하 | 네이티브 구현(B안), 명확한 콘텐츠 귀속 표기, 개인정보처리방침 페이지 준비 |
 | 단독 개발자 번아웃 | 중 | 중 | M0~M3까지가 실사용 가치의 80%. 여기서 일단 “쓸 만한 상태”로 마감하고 휴지기 |
 

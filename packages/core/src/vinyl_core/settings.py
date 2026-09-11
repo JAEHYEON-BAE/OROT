@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # 알림을 눌렀을 때 이동할 주소. 브라우저에서 접근 가능한 공개 주소여야 한다.
     public_web_url: str = "http://localhost:3000"
 
+    # ─── 운영자 알림 (T-116) ────────────────────────────────────
+    # Slack Incoming Webhook URL. 비어 있으면 알림만 꺼지고 발송은 정상 동작한다.
+    # **이 URL 자체가 비밀이다** — 아는 사람은 누구나 그 채널에 글을 쓸 수 있다.
+    slack_webhook_url: str = ""
+
+    @property
+    def alerts_enabled(self) -> bool:
+        return bool(self.slack_webhook_url.strip())
+
     @property
     def push_enabled(self) -> bool:
         """키가 모두 있어야 푸시를 쓸 수 있다."""

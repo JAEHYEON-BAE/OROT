@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Request, Response
 from vinyl_core.enums import EventType
 from vinyl_core.models import Artist
+from vinyl_core.settings import get_settings
 
 from vinyl_api.deps import SessionDep
 from vinyl_api.feed_query import latest_event_per_release
@@ -44,7 +45,7 @@ _EVENT_LABEL: dict[str, str] = {
 async def feed_rss(session: SessionDep, request: Request) -> Response:
     """공개된 일정의 이벤트를 RSS 2.0 으로 반환한다."""
     now = datetime.now(UTC)
-    base = str(request.base_url).rstrip("/")
+    base = get_settings().public_web_url.rstrip("/")
 
     # `/v1/feed` 와 **같은 규칙**으로 고른다 (T-118) — 발매당 최신 이벤트 하나.
     # 두 피드가 다른 것을 보여 주면 어느 쪽이 맞는지 알 수 없다.
@@ -88,7 +89,7 @@ async def feed_rss(session: SessionDep, request: Request) -> Response:
 
         feed.add_item(
             title=f"[{action}] {label}",
-            link=release.links[0].url if release.links else f"{base}/v1/releases/{release.id}",
+            link=release.links[0].url if release.links else f"{base}/releases/{release.id}",
             guid=f"event-{event.id}@vinyl-radar",
             published_at=event.occurred_at,
             description=" · ".join(details),

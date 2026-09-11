@@ -66,7 +66,7 @@ class WebPushSender:
             # 키 없이는 암호화가 불가능하다. 재시도해도 달라지지 않는다.
             return SendResult(SendOutcome.GONE, "구독에 암호화 키가 없음")
 
-        # **입력 검증만으로는 부족하다** (T-121). 허용 목록이 생기기 전에 등록된 행이
+        # **입력 검증만으로는 부족하다** (T-130). 허용 목록이 생기기 전에 등록된 행이
         # DB 에 남아 있을 수 있고, 그 주소로 요청을 보내는 것은 이쪽이다.
         # 보내기 직전에 한 번 더 확인해야 SSRF 경로가 실제로 닫힌다.
         if not is_allowed_push_endpoint(subscription.token):

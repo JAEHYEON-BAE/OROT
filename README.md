@@ -1,102 +1,113 @@
 # Vinyl Radar
 
-국내 레코드샵·레이블·유통사에 흩어진 바이닐(LP) 발매·재고 정보를 하나의 피드로 모으고,
-상태 변화를 감지해 수집가에게 알립니다.
+국내 바이닐의 **발매 일정과 예약판매 기간을 구독하고 알림을 받는 서비스**입니다.
+현재는 운영자가 일정을 입력하고, 사용자는 웹 피드·캘린더·RSS·iCalendar·Web Push로 확인합니다.
+M1 기능과 M2 시각 기반 알림이 구현되어 있으며, 자동 수집은 M3까지 연결하지 않습니다.
 
-- **전체 명세**: [`docs/BLUEPRINT.ko.md`](docs/BLUEPRINT.ko.md) (원본) / [`docs/BLUEPRINT.en.md`](docs/BLUEPRINT.en.md) (미러)
-- **에이전트 컨텍스트**: [`CLAUDE.md`](CLAUDE.md)
-- **소스별 조사 기록**: [`docs/adapters/`](docs/adapters/)
-- **아키텍처 결정 기록**: [`docs/adr/`](docs/adr/)
+- [한국어 블루프린트](docs/BLUEPRINT.ko.md) / [영어판](docs/BLUEPRINT.en.md)
+- [에이전트 지침](AGENTS.md) / [프로젝트 맥락](CLAUDE.md)
+- [아키텍처 결정](docs/adr/) / [소스 조사 기록](docs/adapters/)
+- [실행 흐름 점검](docs/runtime-review.md) / [문서 정합성 점검](docs/documentation-review.md)
 
-현재 마일스톤은 **M0 (Walking Skeleton)** 입니다.
+문서와 현재 소스·마이그레이션·실행 설정이 충돌하면 구현을 기준으로 문서를 갱신합니다.
+계획된 검색·계정·워치리스트·iOS 앱·클라우드 CI/CD는 아직 없습니다.
 
----
+## 실행
 
-## 빠른 시작
-
-### 1) 컨테이너 스택
+Docker 엔진과 Compose가 필요합니다. 현재 macOS 테스트 환경은 colima를 사용합니다.
 
 ```bash
-cp .env.example .env
-make up        # postgres + api + collector 기동 후 /healthz 200 까지 대기
+# 최초 설정에만 사용합니다. 기존 .env는 보존합니다.
+cp -n .env.example .env
+# .env의 ADMIN_API_KEY를 설정한 뒤 실행합니다.
+make up        # postgres + api + collector + 개발 웹
+make migrate   # 최초 실행 또는 새 마이그레이션 적용 시
+make seed      # sources 시드만 적재
 ```
+
+공개 테스트용 웹 빌드는 `make prod`입니다. 이 명령은 `compose.prod.yaml`을 추가 적용하며
+staging/production 설정에서는 기본 관리자 키와 32자 미만 키를 거부합니다.
+공개 테스트에는 충분한 무작위성을 가진 비밀 키를 사용합니다.
 
 | 주소 | 내용 |
 |---|---|
-| **http://localhost:3000** | **웹 — 피드·캘린더** |
-| http://localhost:8000/admin | 운영자 일정 등록 폼 |
-| http://localhost:8000/v1/releases.ics | 캘린더 구독 (iCalendar) |
-| http://localhost:8000/v1/feed.rss | RSS 구독 |
-| http://localhost:8000/docs | OpenAPI 문서 |
-| http://localhost:8000/healthz | 헬스체크 (DB 연결 포함) |
+| http://localhost:3000 | 피드 |
+| http://localhost:3000/calendar | 월간 캘린더 |
+| http://localhost:3000/subscribe | 푸시·RSS·캘린더 구독 |
+| http://localhost:3000/v1/releases.ics | 공개 웹을 통한 iCalendar |
+| http://localhost:3000/v1/feed.rss | 공개 웹을 통한 RSS |
+| http://localhost:8000/admin | 운영자 등록·편집·공개 관리 |
+| http://localhost:8000/docs | API 문서 |
+| http://localhost:8000/healthz | DB 연결 포함 헬스체크 |
+
+포트 기본값은 3000/8000/5432이며 모두 loopback에 바인딩됩니다. 현재 공개 시험 주소는
+`https://jaehyeonui-macmini.tail598a5f.ts.net`입니다. 실제 Funnel 설정은 `tailscale funnel status`로 확인합니다.
+Funnel은 웹 포트만 공개하고 관리자/API·DB 포트는 공개하지 않습니다.
+
+`.env`의 `PUBLIC_WEB_URL`을 공개 웹 주소로 설정해야 알림과 구독 링크가 휴대폰에서 열립니다.
+웹 내부 API 호출에는 Compose가 `API_BASE_URL=http://api:8000`을 전달합니다.
+`PUBLIC_API_URL`은 사용하지 않습니다. Web Push에는 VAPID 키 쌍과 연락처인 `VAPID_SUBJECT`가 필요합니다.
 
 ```bash
-make ps      # 상태
-make logs    # 로그 추적
-make down    # 종료 (DB 볼륨은 유지)
+make ps
+make logs
+make prod-logs
+make down      # 컨테이너 종료, DB 볼륨 유지
 ```
 
-**사전 요구사항**: Docker 엔진과 Compose v2.
-macOS 에서 Docker Desktop 없이 쓰려면:
+API는 두 모드 모두 소스 마운트와 `--reload`를 사용합니다. collector는 소스 편집 후 재시작해야 합니다.
+production 웹은 소스 마운트가 없으므로 재빌드해야 합니다. `.env` 변경은 단순 restart로 반영되지 않으며
+사용 중인 Compose 오버레이로 컨테이너를 재생성해야 합니다. `make prod`는 재빌드·재생성을 수행합니다.
+
+## 개발과 검증
 
 ```bash
-brew install docker docker-compose
-colima start --cpu 2 --memory 4 --disk 60
+make install   # venv/ + 세 Python 패키지 editable 설치
+make lint      # Ruff, 포맷, core mypy
+make test      # Python fixture/mock 중심 테스트
+make openapi   # API 계약 스냅샷 생성
+
+cd apps/web
+npm ci
+npm run lint
+node --test tests/*.test.mjs
+npm run build
 ```
 
-### 2) 컨테이너 밖에서 개발
+웹 API 타입은 `apps/web/lib/api.ts`의 수기 타입입니다. 생성 클라이언트나 자동 CI는 없습니다.
+별도 DB 검증은 `apps/api/tests/integration_runtime.py`의 격리 스키마·롤백·가짜 발송기 방식으로 수행합니다.
+문서만 수정할 때는 경로·명령·API 계약을 대조하며 서비스 기동이나 실제 알림을 필요로 하지 않습니다.
 
-```bash
-make install   # venv 생성 + 3개 패키지를 editable 로 설치
-make test      # pytest
-make lint      # ruff check + format --check + mypy(core strict)
-make format    # 자동 수정
-```
+## 주요 구조
 
-`make help` 로 전체 타깃을 볼 수 있습니다.
+| 경로 | 역할 |
+|---|---|
+| `apps/api/` | 관리자 CRUD, 공개 조회·피드·RSS·ICS, 푸시 구독 |
+| `apps/collector/` | 60초 시각 이벤트/배송 스케줄러, Web Push 발송기, 수동 수집 CLI |
+| `apps/web/` | Next.js PWA, 피드·캘린더·상세·구독, 같은 출처 중계 |
+| `packages/core/` | 설정·DB·ORM·어댑터·시각 이벤트·배송 계획 |
+| `migrations/` | Alembic 리비전 |
+| `infra/` | Mac 기동 및 DB/.env 백업 스크립트 |
+| `docs/` | 현재 계약과 향후 계획을 구분한 문서 |
 
----
+## 데이터·알림 정책
 
-## 저장소 구조
+- 초안은 공개 조회에서 제외합니다. 공개 취소 후 삭제는 가능하지만 연결된 수집 상품 등이 있으면 거부합니다.
+  삭제하면 해당 음반의 이벤트·배송 이력도 제거됩니다. 일정 수정은 삭제 대신 옛 이벤트를 무효화합니다.
+- 알림은 60초 주기로 생성·발송하며 실패 시 최대 3회 시도합니다. 구독 전 이벤트와 48시간을 지난 이벤트는 보내지 않습니다.
+  푸시 서비스 수락과 실제 기기 표시 확인은 다르며, 전송/DB 커밋 사이의 장애에서는 중복 가능성이 남습니다.
+- 실제 시험 알림은 사용자 승인 범위에서만 보냅니다. 기존 더미 데이터도 임의로 지우지 않습니다.
+- `make backup`은 DB, `make backup-env`는 `.env`를 백업합니다. 기본 저장 위치는 프로젝트 내부이므로
+  디스크 밖 보관은 별도 설정해야 합니다. 복구는 기존 내용을 덮어쓰므로 승인과 사전 백업이 필요합니다.
 
-```
-apps/
-  api/        FastAPI. 현재는 /healthz 만 구현 (T-001)
-  collector/  수집기 + CLI. 어댑터는 T-007 부터
-    tests/fixtures/<source_id>/   저장된 HTML 골든 fixture
-packages/
-  core/       API·collector 공용. 설정·DB·로깅 (모델은 T-002)
-docs/
-  BLUEPRINT.{ko,en}.md   전체 명세 (권위 문서)
-  adapters/<source_id>.md  소스별 조사 기록
-  adr/NNNN-*.md            아키텍처 결정 기록
-```
+## 자동 수집의 현재 범위
 
-전체 목표 구조는 블루프린트 §6 을 참조하십시오.
-`apps/web` (Next.js) 는 T-011, `apps/ios` 는 T-033 에서 추가됩니다.
+Fetcher와 gimbab/secondtrack/poclanos 어댑터는 있으나 주기 수집·DB 적재·정규화·병합은 연결되지 않았습니다.
+`collector run --source ... --dry-run`은 **실사이트에 요청하고 결과만 출력**하며, DB를 쓰지 않는다는 뜻입니다.
+오프라인 테스트로 실행하지 않습니다. `review-merges` 명령은 없습니다.
 
----
+수집 시에는 robots 준수, 소스별 0.5 req/s·동시 연결 2 이하, 연락처가 포함된 User-Agent,
+메타데이터와 원본 링크만 사용, 차단 우회 금지를 지킵니다. 설정 검증과 Fetcher가 일부를 강제하지만
+소스 자동 비활성화·운영자 알림·파서 카나리는 아직 없으며 robots 파서 한계는 ADR-0003에 기록되어 있습니다.
 
-## 수집 원칙 (블루프린트 §3.4)
-
-이 프로젝트는 타인의 사이트를 읽습니다. 다음은 타협 대상이 아닙니다.
-
-- robots.txt 를 준수합니다
-- 소스별 **최대 0.5 req/s**, 동시 연결 2 이하
-- User-Agent 로 정체와 연락처를 밝힙니다
-- **메타데이터만 저장**합니다. 상세설명 원문·리뷰를 저장하지 않고, 이미지를 재호스팅하지 않습니다
-- 모든 화면에서 출처를 표기하고 원본 상품 페이지로 링크합니다
-- CAPTCHA·봇 차단 우회, 비공개 내부 API 역공학을 하지 않습니다
-
-앞의 두 항목은 `vinyl_core.settings.Settings` 의 검증기가 강제합니다 —
-`CRAWLER_RATE_LIMIT_RPS` 가 0.5 를 넘거나 User-Agent 에 연락처가 없으면 **프로세스가 기동하지 않습니다.**
-
-테스트는 **실시간 네트워크 요청을 하지 않습니다.** 어댑터 테스트는 저장된 fixture 를 읽습니다
-([`apps/collector/tests/fixtures/README.md`](apps/collector/tests/fixtures/README.md)).
-
----
-
-## 작업 방식
-
-한 번에 하나의 태스크(`T-XXX`, 블루프린트 §10)만 진행합니다.
-현재 상태와 결정 기록은 [`CLAUDE.md`](CLAUDE.md) §7 에 있습니다.
+전체 명령은 `make help`, 구현과 계획의 구분은 블루프린트 §2·§5·§6·§9·§10을 참고하십시오.

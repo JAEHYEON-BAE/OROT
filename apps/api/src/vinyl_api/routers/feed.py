@@ -1,26 +1,12 @@
-"""통합 피드 (T-106, 블루프린트 §5.2).
-
-"놓치지 않게" 가 제품의 약속이므로 피드의 첫 화면은 **곧 일어날 일**이어야 한다.
-그래서 한 배열 안에 두 종류를 섞되 순서를 이렇게 둔다.
-
-1. `UPCOMING` — 아직 예약이 시작되지 않은 일정. **임박한 순**
-2. `EVENT`    — 이미 일어난 일 (`SCHEDULE_ADDED` 등). **최신순**
-
-지금은 `SCHEDULE_ADDED` 밖에 없어 아래쪽이 얇지만,
-M2 에서 시각 기반 알림(`PREORDER_OPEN` 등)이 붙으면 그대로 채워진다.
-
-> 커서 페이지네이션을 쓰지 않는다. 피드는 앞부분만 보는 화면이고,
-> 종류가 섞인 목록에 keyset 커서를 얹으면 복잡도만 늘고 얻는 것이 없다.
-> 깊이 훑어야 할 때는 `/v1/releases` 를 쓴다.
-"""
+"""공개 음반당 한 줄인 피드. 최근 변경순 또는 시작 일정 임박순으로 정렬한다."""
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import DateTime, case, cast, func, select
 from sqlalchemy.orm import selectinload
 from vinyl_core.enums import EventType
 from vinyl_core.models import Release
@@ -58,53 +44,64 @@ class FeedPage(BaseModel):
     generated_at: datetime
 
 
+def release_feed_query(sort: str, now: datetime, limit: int):
+    """날짜만 있는 발매일은 한국 시간 자정으로 정렬한다."""
+    start = func.coalesce(
+        Release.preorder_opens_at,
+        func.timezone("Asia/Seoul", cast(Release.release_date, DateTime)),
+    )
+    query = (
+        select(Release).where(Release.is_published.is_(True)).options(selectinload(Release.links))
+    )
+    if sort == "recent":
+        # **등록이 아니라 마지막 손댄 시각** 기준이다. 일정을 고치면 그것이 소식이므로
+        # 위로 올라와야 한다 — 등록 시각으로 줄세우면 방금 바꾼 일정이 아래에 묻힌다.
+        # `updated_at` 은 모델의 `onupdate=func.now()` 가 갱신한다.
+        query = query.order_by(Release.updated_at.desc(), Release.id.desc())
+    else:
+        # Future first, most recently started next, unknown dates last.
+        query = query.order_by(
+            case((start >= now, 0), (start.is_not(None), 1), else_=2),
+            case((start >= now, start)).asc(),
+            case((start < now, start)).desc(),
+            Release.created_at.desc(),
+            Release.id.desc(),
+        )
+    return query.limit(limit)
+
+
 @router.get("/feed", response_model=FeedPage)
 async def get_feed(
     session: SessionDep,
     request: Request,
     response: Response,
     limit: Annotated[int, Query(ge=1, le=MAX_FEED_LIMIT)] = DEFAULT_FEED_LIMIT,
+    sort: Literal["recent", "imminent"] = "imminent",
 ) -> Response:
-    """다가오는 일정과 최근 이벤트를 한 타임라인으로 반환한다."""
+    """중복 제거와 정렬을 LIMIT 전에 적용한다."""
     now = datetime.now(UTC)
-
-    upcoming_rows = (
-        await session.scalars(
-            select(Release)
-            .where(
-                Release.is_published.is_(True),
-                Release.preorder_opens_at.is_not(None),
-                Release.preorder_opens_at >= now,
+    rows = (await session.scalars(release_feed_query(sort, now, limit))).all()
+    ids = [row.id for row in rows]
+    event_rows = (
+        (await session.execute(latest_event_per_release(limit).where(Release.id.in_(ids)))).all()
+        if ids
+        else []
+    )
+    events = {release.id: event for event, release in event_rows}
+    items = []
+    for row in rows:
+        event = events.get(row.id)
+        upcoming = row.preorder_opens_at is not None and row.preorder_opens_at > now
+        items.append(
+            FeedItem(
+                kind=FeedKind.UPCOMING if upcoming else FeedKind.EVENT,
+                at=row.preorder_opens_at
+                if upcoming
+                else (event.occurred_at if event else row.created_at),
+                event_type=None if upcoming or event is None else event.event_type,
+                release=await release_to_out(session, row),
             )
-            .options(selectinload(Release.links))
-            .order_by(Release.preorder_opens_at.asc(), Release.id.asc())
-            .limit(limit)
         )
-    ).all()
-
-    items: list[FeedItem] = [
-        FeedItem(
-            kind=FeedKind.UPCOMING,
-            at=row.preorder_opens_at,  # type: ignore[arg-type]  # 위 where 절이 NULL 을 배제한다
-            release=await release_to_out(session, row),
-        )
-        for row in upcoming_rows
-    ]
-
-    remaining = limit - len(items)
-    if remaining > 0:
-        # 발매당 최신 이벤트 하나만 (T-118). 같은 앨범이 피드 상단을 여러 줄
-        # 차지하는 것을 막는다 — 자세한 이유는 `feed_query` 참조.
-        event_rows = (await session.execute(latest_event_per_release(remaining))).all()
-        for event, release in event_rows:
-            items.append(
-                FeedItem(
-                    kind=FeedKind.EVENT,
-                    at=event.occurred_at,
-                    event_type=event.event_type,
-                    release=await release_to_out(session, release),
-                )
-            )
 
     page = FeedPage(items=items, generated_at=now)
     payload = Response(content=page.model_dump_json(), media_type="application/json")

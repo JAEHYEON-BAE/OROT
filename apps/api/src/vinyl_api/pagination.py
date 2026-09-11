@@ -36,11 +36,15 @@ def encode_cursor(sort_key: datetime | None, row_id: int) -> str:
 
 def decode_cursor(cursor: str) -> tuple[datetime | None, int]:
     """커서를 (정렬 키, id) 로 되돌린다. 형식이 깨졌으면 예외."""
+    if len(cursor) > 256 or not cursor.isascii():
+        raise InvalidCursorError("커서 형식이 올바르지 않습니다.")
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
         raw = base64.urlsafe_b64decode(padded.encode()).decode()
         key_text, id_text = raw.rsplit(_SEPARATOR, 1)
         row_id = int(id_text)
+        if not 0 < row_id <= 9223372036854775807:
+            raise ValueError("id out of range")
     except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
         msg = "커서 형식이 올바르지 않습니다."
         raise InvalidCursorError(msg) from exc
@@ -48,7 +52,10 @@ def decode_cursor(cursor: str) -> tuple[datetime | None, int]:
     if key_text == _INFINITY:
         return None, row_id
     try:
-        return datetime.fromisoformat(key_text), row_id
+        parsed = datetime.fromisoformat(key_text)
+        if parsed.tzinfo is None:
+            raise ValueError("timezone required")
+        return parsed, row_id
     except ValueError as exc:
         msg = "커서의 정렬 키를 해석할 수 없습니다."
         raise InvalidCursorError(msg) from exc

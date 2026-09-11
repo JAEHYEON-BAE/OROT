@@ -100,16 +100,19 @@ CREATE TABLE notification_deliveries (
     last_error      TEXT,
     sent_at         TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (event_id, device_token_id)   -- 같은 이벤트를 같은 기기에 두 번 보내지 않는다
+    UNIQUE (event_id, device_token_id)   -- 같은 이벤트/기기의 배송 행 중복을 막는다
 );
 CREATE INDEX ON notification_deliveries (status, created_at);
 ```
 
-`UNIQUE (event_id, device_token_id)` 하나가 재발송을 구조적으로 막는다.
-스케줄러가 재기동해도, 두 프로세스가 겹쳐 돌아도 같은 알림이 두 번 나가지 않는다.
+**2026-09-11 구현 정정:** UNIQUE는 배송 행의 중복을 막는다. 현재 스케줄러는 DB 잠금으로
+중복 실행을 막고 SENT를 재처리하지 않는다. 그러나 외부 푸시 전송과 DB 커밋은 원자적이지 않아
+전송 성공 직후 종료되거나 응답이 유실되면 재전송 가능성이 있다. exactly-once 보장은 아니다.
+SENT는 푸시 서비스 수락이며 실제 화면 표시 확인이 아니다.
 
-`EXPIRED` 는 구독이 만료된 경우다 — Web Push 는 `404`/`410` 을 돌려주며,
-그때는 재시도하지 않고 구독을 비활성화한다.
+`EXPIRED`는 만료 구독뿐 아니라 공개 취소·구독 해지·이벤트 무효화·발송 기한 초과도 포함한다.
+Web Push의 404/410은 구독도 비활성화한다. FAILED는 최대 3회 시도하며 배송 생성 1분·5분
+이후 재시도할 수 있다. 재시도 소진은 로그에 남지만 외부 운영자 알림은 아직 없다.
 
 ## 6. API
 

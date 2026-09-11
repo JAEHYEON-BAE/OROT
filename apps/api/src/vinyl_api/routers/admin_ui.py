@@ -53,17 +53,39 @@ _PAGE = """<!doctype html>
   body.editing #h1::after { content: " — 수정 중"; color: #2a6; }
   .link-row label { margin-top: 0; }
   @media (max-width: 640px) { .link-row { grid-template-columns: 1fr; } }
+  .topbar { display:flex; align-items:center; gap:.75rem; margin-bottom:.5rem; }
+  .topbar .hint { margin:0; }
+  .linkish { background:none; border:0; padding:0; color:#0645ad; cursor:pointer;
+             text-decoration:underline; font-size:.85rem; width:auto; }
+  #loginOut { margin-left:.6rem; font-size:.85rem; }
+  #loginOut.err { color:#b00020; }
 </style>
+
+<!-- 로그인 화면. 키가 확인되기 전에는 이것만 보인다 (T-134). -->
+<section id="login">
+  <h1>운영자 로그인</h1>
+  <p class="sub">Vinyl Radar 관리 화면입니다.</p>
+  <form id="loginForm">
+    <fieldset>
+      <legend>운영자 키</legend>
+      <input id="key" type="password" placeholder="ADMIN_API_KEY"
+             autocomplete="current-password" required>
+      <p class="hint">이 브라우저 탭에만 보관되며 서버로 저장되지 않습니다.</p>
+      <button type="submit" id="loginBtn">로그인</button>
+      <span id="loginOut"></span>
+    </fieldset>
+  </form>
+</section>
+
+<section id="app" hidden>
+<div class="topbar">
+  <span class="hint" id="who">운영자로 로그인됨</span>
+  <button type="button" id="logout" class="linkish">로그아웃</button>
+</div>
 
 <h1 id="h1">발매 일정 등록</h1>
 <p class="sub" id="sub">등록하면 <strong>초안</strong>으로 저장됩니다.
   공개해야 사용자에게 보입니다.</p>
-
-<fieldset>
-  <legend>운영자 키</legend>
-  <input id="key" type="password" placeholder="ADMIN_API_KEY" autocomplete="off">
-  <p class="hint">이 브라우저 탭에만 보관되며 서버로 저장되지 않습니다.</p>
-</fieldset>
 
 <form id="f">
   <fieldset>
@@ -119,12 +141,74 @@ _PAGE = """<!doctype html>
 <table id="list"><thead><tr>
   <th>ID</th><th>아티스트 / 앨범</th><th>예약 시작</th><th>구매처</th><th>상태</th><th>동작</th>
 </tr></thead><tbody></tbody></table>
+</section>
 
 <script>
 const $ = (s) => document.querySelector(s);
-const key = () => $("#key").value.trim();
-$("#key").value = sessionStorage.getItem("adminKey") || "";
-$("#key").addEventListener("change", () => sessionStorage.setItem("adminKey", key()));
+
+// ── 로그인 (T-134) ──────────────────────────────────────────
+// 키는 여전히 `X-Admin-Key` 헤더로만 나간다. 바뀐 것은 **화면의 흐름**뿐이다 —
+// 키 칸이 페이지마다 떠 있으면 매번 다시 넣어야 하는 것처럼 보이고,
+// 비어 있는 채로 등록을 눌러 401 을 받는 일이 반복된다.
+//
+// 세션 저장소를 쓴다. 탭을 닫으면 사라지므로 공용 기기에 남지 않는다.
+let adminKey = sessionStorage.getItem("adminKey") || "";
+const key = () => adminKey;
+
+function enterApp() {
+  $("#login").hidden = true;
+  $("#app").hidden = false;
+}
+
+function leaveApp(message) {
+  adminKey = "";
+  sessionStorage.removeItem("adminKey");
+  $("#app").hidden = true;
+  $("#login").hidden = false;
+  $("#key").value = "";
+  loginMessage(message || "");
+  $("#key").focus();
+}
+
+function loginMessage(text) {
+  const o = $("#loginOut");
+  o.textContent = text;
+  o.className = text ? "err" : "";
+}
+
+/** 키가 맞는지 **서버에 물어본다.** 형식만 보고 통과시키면 첫 등록에서야 실패한다. */
+async function verifyKey(candidate) {
+  const res = await fetch("/admin/releases", { headers: { "X-Admin-Key": candidate } });
+  if (res.ok) return true;
+  if (res.status === 401) return false;
+  throw new Error(`${res.status}`);
+}
+
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const candidate = $("#key").value.trim();
+  if (!candidate) return;
+  const btn = $("#loginBtn");
+  btn.disabled = true;
+  loginMessage("");
+  try {
+    if (await verifyKey(candidate)) {
+      adminKey = candidate;
+      sessionStorage.setItem("adminKey", adminKey);
+      $("#key").value = "";
+      enterApp();
+      await load();
+    } else {
+      loginMessage("키가 올바르지 않습니다.");
+    }
+  } catch (err) {
+    loginMessage(`서버에 연결하지 못했습니다 (${err.message}).`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("#logout").addEventListener("click", () => leaveApp(""));
 
 function show(msg, ok) {
   const o = $("#out");
@@ -145,6 +229,11 @@ async function api(path, options = {}) {
     },
   });
   const text = await res.text();
+  if (res.status === 401) {
+    // 서버에서 키가 바뀐 경우다. 오류만 띄우면 왜 안 되는지 알 수 없다.
+    leaveApp("세션이 만료되었습니다. 다시 로그인하십시오.");
+    throw new Error("401");
+  }
   if (!res.ok) throw new Error(`${res.status} ${text}`);
   return text ? JSON.parse(text) : null;
 }
@@ -189,6 +278,7 @@ function readRow(row) {
     shop_name: row.querySelector(".l-shop").value.trim(),
     url: row.querySelector(".l-url").value.trim(),
     price_krw: price ? Number(price) : null,
+    source_id: row.dataset.origin ? JSON.parse(row.dataset.origin).source_id : null,
   };
 }
 
@@ -269,45 +359,10 @@ function readForm() {
   };
 }
 
-// 편집 중에는 링크를 따로 맞춘다 — 사라진 것은 지우고, 새로 생기거나 바뀐 것은 더한다.
-async function syncLinks(id) {
-  const rows = [...document.querySelectorAll(".link-row")];
-  const keep = new Set();
-  const toAdd = [];
-
-  for (const row of rows) {
-    const current = readRow(row);
-    if (!current.url) continue;
-    current.shop_name = current.shop_name || "판매처";
-
-    if (row.dataset.linkId) {
-      const origin = JSON.parse(row.dataset.origin);
-      const changed =
-        origin.url !== current.url ||
-        origin.shop_name !== current.shop_name ||
-        (origin.price_krw ?? null) !== current.price_krw;
-      // 링크에는 부분 수정 API 가 없다. 바뀌었으면 지우고 다시 만든다.
-      if (changed) toAdd.push(current);
-      else keep.add(Number(row.dataset.linkId));
-    } else {
-      toAdd.push(current);
-    }
-  }
-
-  const existing = await api(`/admin/releases/${id}`).catch(() => null);
-  const currentLinks = existing ? existing.links : [];
-  for (const link of currentLinks) {
-    if (!keep.has(link.id)) {
-      await api(`/admin/releases/${id}/links/${link.id}`, { method: "DELETE" });
-    }
-  }
-  for (const link of toAdd) {
-    await api(`/admin/releases/${id}/links`, { method: "POST", body: JSON.stringify(link) });
-  }
-}
-
 $("#f").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if ($("#submitBtn").disabled) return;
+  $("#submitBtn").disabled = true;
   try {
     if (editingId === null) {
       const body = { ...readForm(), links: collectLinks() };
@@ -322,19 +377,22 @@ $("#f").addEventListener("submit", async (e) => {
       );
     } else {
       const id = editingId;
-      await api(`/admin/releases/${id}`, { method: "PATCH", body: JSON.stringify(readForm()) });
-      await syncLinks(id);
+      await api(`/admin/releases/${id}`, {
+        method: "PATCH", body: JSON.stringify({ ...readForm(), links: collectLinks() }),
+      });
       show(`일정 #${id} 저장됨`, true);
     }
     resetForm();
     load();
   } catch (err) {
     show(String(err.message), false);
+  } finally {
+    $("#submitBtn").disabled = false;
   }
 });
 
 // ── 목록 ────────────────────────────────────────────────────
-// **문자열로 HTML 을 만들 때는 반드시 이스케이프한다** (T-121).
+// **문자열로 HTML 을 만들 때는 반드시 이스케이프한다** (T-130).
 // 제목·아티스트·판매처 이름은 사람이 입력한 값이라 `<img onerror=...>` 가 들어올 수
 // 있고, 그러면 이 화면에서 실행된다 — 운영자 키가 sessionStorage 에 있으므로
 // 여기서의 XSS 는 곧 운영자 권한 탈취다.
@@ -359,8 +417,10 @@ async function load() {
           <button data-act="edit" data-id="${r.id}">수정</button>
           ${r.is_published
             ? `<button data-act="unpublish" data-id="${r.id}">공개 취소</button>`
-            : `<button class="pub" data-act="publish" data-id="${r.id}">공개</button>
-               <button data-act="delete" data-id="${r.id}">삭제</button>`}
+            : `<button class="pub" data-act="publish" data-id="${r.id}">공개</button>`}
+          ${r.can_delete
+            ? `<button data-act="delete" data-id="${r.id}">삭제</button>`
+            : ""}
         </td>
       </tr>`).join("");
 
@@ -398,7 +458,26 @@ async function load() {
   }
 }
 $("#reload").addEventListener("click", load);
-if (key()) load();
+
+// ── 최초 진입 ───────────────────────────────────────────────
+// 저장된 키가 있어도 **그대로 믿지 않는다.** 서버에서 키를 바꿨을 수 있으므로
+// 한 번 확인하고 들어간다 — 아니면 화면은 열리는데 모든 동작이 401 로 실패한다.
+(async () => {
+  // 마크업의 hidden 속성에만 기대지 않는다 — 순서가 바뀌어도 키 없이 본문이 열리면 안 된다.
+  $("#app").hidden = true;
+  $("#login").hidden = false;
+  if (!adminKey) { $("#key").focus(); return; }
+  try {
+    if (await verifyKey(adminKey)) {
+      enterApp();
+      await load();
+    } else {
+      leaveApp("세션이 만료되었습니다. 다시 로그인하십시오.");
+    }
+  } catch {
+    leaveApp("서버에 연결하지 못했습니다.");
+  }
+})();
 </script>
 </html>
 """

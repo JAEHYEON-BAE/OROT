@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { getReleases, type Release } from "@/lib/api";
+import { getAllReleases, type Release } from "@/lib/api";
 import { releaseLabel } from "@/lib/format";
+import { calendarMonth } from "@/lib/calendar";
 
 export const dynamic = "force-dynamic";
 
@@ -14,28 +15,15 @@ function kstDayKey(iso: string): string {
 
 type Marker = { release: Release; kind: "preorder" | "release" };
 
-/** `YYYY-MM` 만 받아들인다. 형식이나 범위가 어긋나면 null. */
-function parseMonth(month: string | undefined): Date | null {
-  if (!month || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return null;
-  const parsed = new Date(`${month}-01T00:00:00+09:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
 export default async function CalendarPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string }>;
+  searchParams: Promise<{ month?: string | string[] }>;
 }) {
   const { month } = await searchParams;
   const today = new Date();
-  // **쿼리 문자열은 인증 없이 누구나 넣는다.** 검증 없이 Date 에 넘기면 Invalid Date 가
-  // 되고, 그 NaN 이 아래 Array 길이로 흘러 `RangeError` → 500 이 된다 (T-121).
-  // 잘못된 값은 오류가 아니라 **이번 달**로 다룬다 — 링크를 잘못 눌렀을 뿐이다.
-  const base = parseMonth(month) ?? today;
-  const year = base.getFullYear();
-  const monthIndex = base.getMonth();
-
-  const { items } = await getReleases();
+  const { year, monthIndex } = calendarMonth(month, today);
+  const { items } = await getAllReleases();
 
   // 하루에 여러 일정이 걸릴 수 있으므로 날짜별로 모은다.
   const byDay = new Map<string, Marker[]>();
@@ -50,9 +38,9 @@ export default async function CalendarPage({
     }
   }
 
-  const first = new Date(year, monthIndex, 1);
-  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const leading = first.getDay();
+  const first = new Date(Date.UTC(year, monthIndex, 1));
+  const daysInMonth = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const leading = first.getUTCDay();
   const cells: (number | null)[] = [
     ...Array<null>(leading).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
@@ -60,8 +48,8 @@ export default async function CalendarPage({
   while (cells.length % 7 !== 0) cells.push(null);
 
   const monthKey = (offset: number) => {
-    const d = new Date(year, monthIndex + offset, 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const d = new Date(Date.UTC(year, monthIndex + offset, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   };
   const todayKey = today.toLocaleDateString("en-CA", { timeZone: KST });
 

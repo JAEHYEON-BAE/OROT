@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, cast
+from zoneinfo import ZoneInfo
 
 import structlog
 from sqlalchemy import and_, select, update
@@ -78,6 +79,7 @@ async def _emit(
     candidates: list[Release],
     *,
     value_of: str,
+    occurred_at: datetime,
 ) -> int:
     """후보 중 아직 이벤트가 없는 것에만 이벤트를 만든다."""
     if not candidates:
@@ -95,6 +97,7 @@ async def _emit(
             ListingEvent(
                 release_id=release.id,
                 event_type=event_type,
+                occurred_at=occurred_at,
                 new_value={
                     "title": release.title,
                     value_of: moment.isoformat() if moment is not None else None,
@@ -152,20 +155,30 @@ async def generate_due_events(
             select(Release).where(
                 published,
                 Release.release_date.is_not(None),
-                Release.release_date <= moment.date(),
-                Release.release_date >= horizon.date(),
+                Release.release_date <= moment.astimezone(ZoneInfo("Asia/Seoul")).date(),
+                Release.release_date >= horizon.astimezone(ZoneInfo("Asia/Seoul")).date(),
             )
         )
     )
 
     result = GeneratedEvents(
         preorder_opens_soon=await _emit(
-            session, EventType.PREORDER_OPENS_SOON, soon, value_of="preorder_opens_at"
+            session,
+            EventType.PREORDER_OPENS_SOON,
+            soon,
+            value_of="preorder_opens_at",
+            occurred_at=moment,
         ),
         preorder_open=await _emit(
-            session, EventType.PREORDER_OPEN, opened, value_of="preorder_opens_at"
+            session,
+            EventType.PREORDER_OPEN,
+            opened,
+            value_of="preorder_opens_at",
+            occurred_at=moment,
         ),
-        released=await _emit(session, EventType.RELEASED, released, value_of="release_date"),
+        released=await _emit(
+            session, EventType.RELEASED, released, value_of="release_date", occurred_at=moment
+        ),
     )
     await session.flush()
 

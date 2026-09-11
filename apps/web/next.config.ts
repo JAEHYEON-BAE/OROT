@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-// 콘텐츠 보안 정책 (T-121).
+// 콘텐츠 보안 정책 (T-130).
 //
 // `script-src` 에 'unsafe-inline' 이 남아 있다. Next 가 하이드레이션 데이터를
 // 인라인 스크립트로 넣기 때문인데, 없애려면 요청마다 nonce 를 발급해야 한다.

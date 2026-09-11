@@ -1,6 +1,10 @@
 # 공개 테스트 전 보안 점검 — 2026-09-10
 
-## 확인 범위와 현재 상태
+> 이 문서는 2026-09-10 **Funnel 연결 전 점검 당시**의 기록이다. 이후 Funnel 공개와 이미지
+> 반영을 완료했고 재시도도 구현했다. 후속 상태는 [실행 점검](runtime-review.md)과
+> [문서 정합성 점검](documentation-review.md)을 참고한다. 아래 테스트·취약점 수치는 당시 결과다.
+
+## 확인 범위와 당시 상태
 
 - 사용자는 Tailscale 서비스 시작과 `tailscale up`까지만 실행했다.
   `tailscale funnel status`도 `No serve config`였다. 공개 URL은 아직 없다.
@@ -45,7 +49,7 @@
 코드 수정과 실행 중인 이미지 반영은 별개다. 공개하기 전에
 `docker compose -f compose.yaml -f compose.prod.yaml up -d --build api collector web`
 로 반영하고 `/healthz`, 웹 구독 등록·해지, 실제 기기의 알림을 확인해야 한다.
-이 명령은 아직 실행하지 않았다. API의 개발용 소스 마운트와 `--reload`는
+이 점검 시점에는 실행하지 않았다 (후속 실행 점검에서 반영 완료). API의 개발용 소스 마운트와 `--reload`는
 오버레이에도 남아 있어 일부 Python 수정은 자동 반영될 수 있지만,
 웹 이미지와 상주 수집기는 일괄 반영되었다고 가정하면 안 된다.
 

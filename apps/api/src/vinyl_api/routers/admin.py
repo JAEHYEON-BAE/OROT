@@ -5,16 +5,18 @@
 
 import re
 import unicodedata
-from typing import Final
+from typing import Any, Final, cast
 
 import structlog
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from vinyl_core.enums import Curation, EventType
-from vinyl_core.models import Artist, ListingEvent, Release, ReleaseLink
+from vinyl_core.models import Artist, Listing, ListingEvent, Release, ReleaseLink
 from vinyl_core.schedule_events import supersede_stale_events
 
 from vinyl_api.deps import AdminDep, SessionDep
@@ -47,15 +49,24 @@ async def _get_or_create_artist(session: AsyncSession, name: str) -> Artist:
     existing = await session.scalar(select(Artist).where(Artist.name_norm == name_norm))
     if existing is not None:
         return existing
-    artist = Artist(name_display=name.strip(), name_norm=name_norm)
-    session.add(artist)
-    await session.flush()
+    await session.execute(
+        insert(Artist)
+        .values(name_display=name.strip(), name_norm=name_norm)
+        .on_conflict_do_nothing(index_elements=[Artist.name_norm])
+    )
+    artist = await session.scalar(select(Artist).where(Artist.name_norm == name_norm))
+    assert artist is not None
     return artist
 
 
-async def _load(session: AsyncSession, release_id: int) -> Release:
+async def _load(session: AsyncSession, release_id: int, *, lock: bool = False) -> Release:
     release = await session.scalar(
-        select(Release).where(Release.id == release_id).options(selectinload(Release.links))
+        select(Release)
+        .where(Release.id == release_id)
+        .options(selectinload(Release.links))
+        .with_for_update()
+        if lock
+        else select(Release).where(Release.id == release_id).options(selectinload(Release.links))
     )
     if release is None:
         raise HTTPException(
@@ -64,12 +75,26 @@ async def _load(session: AsyncSession, release_id: int) -> Release:
     return release
 
 
+async def _linked_listing_exists(session: AsyncSession, release_id: int) -> bool:
+    """이 발매에 묶인 크롤 산출물(`listings`)이 있는가.
+
+    `listings` 행은 **절대 지우지 않는다** (CLAUDE.md §2 규칙 4). 그렇다고 남겨 두면
+    사라진 발매를 가리키는 행이 되므로, 이 경우에는 삭제를 거절한다.
+    현재(M2)는 수동 등록만 있어 이런 행이 없지만, M3 에서 수집이 붙으면 생긴다.
+    """
+    return (
+        await session.scalar(select(Listing.id).where(Listing.release_id == release_id).limit(1))
+    ) is not None
+
+
 async def _to_out(session: AsyncSession, release: Release) -> ReleaseAdminOut:
     artist_name = None
     if release.primary_artist_id is not None:
         artist = await session.get(Artist, release.primary_artist_id)
         artist_name = artist.name_display if artist else None
     return ReleaseAdminOut(
+        can_delete=not release.is_published
+        and not await _linked_listing_exists(session, release.id),
         id=release.id,
         title=release.title,
         artist_name=artist_name,
@@ -176,11 +201,13 @@ def _schedule_snapshot(release: Release) -> dict[str, str | None]:
 async def update_release(
     release_id: int, payload: ReleaseUpdate, session: SessionDep, _: AdminDep
 ) -> ReleaseAdminOut:
-    release = await _load(session, release_id)
+    release = await _load(session, release_id, lock=True)
     # 수정 **전** 시각을 먼저 떠 둔다. setattr 뒤에는 옛 값을 알 방법이 없다.
     before = _schedule_snapshot(release)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "links":
+            continue
         if field == "artist_name":
             artist = await _get_or_create_artist(session, value) if value else None
             release.primary_artist_id = artist.id if artist else None
@@ -201,6 +228,9 @@ async def update_release(
 
     after = _schedule_snapshot(release)
     changed = [f for f in SCHEDULE_FIELDS if before[f] != after[f]]
+    # An unpublished release may still have events from its previous publication.
+    # Invalidate those too, otherwise republishing suppresses the new schedule.
+    superseded = await supersede_stale_events(session, release.id, changed) if changed else 0
     # **공개된 일정의 시각이 바뀐 경우에만** 알린다.
     # 초안은 아직 아무에게도 나가지 않았으므로 바뀐 사실이 뉴스가 아니고,
     # 값이 그대로면 저장만 다시 한 것이라 알림을 보내면 노이즈가 된다.
@@ -215,7 +245,6 @@ async def update_release(
         )
         # 옛 시각에서 나온 '예약 임박'·'예약 시작'·'발매'는 역할을 잃었다 (T-119).
         # 무효화하면 피드에서 사라지고, 스케줄러가 **새 시각에 맞춰 다시** 만든다.
-        superseded = await supersede_stale_events(session, release.id, changed)
         log.info(
             "admin.release.schedule_changed",
             release_id=release.id,
@@ -223,7 +252,22 @@ async def update_release(
             superseded=superseded,
         )
 
+    if "links" in payload.model_fields_set:
+        # Keep unchanged URL identities and apply the whole form in this transaction.
+        desired = {link.url: link for link in payload.links}
+        existing_links = {link.url: link for link in release.links}
+        for url, link in existing_links.items():
+            if url not in desired:
+                await session.delete(link)
+        for url, data in desired.items():
+            link = existing_links.get(url)
+            if link is None:
+                session.add(ReleaseLink(release_id=release.id, **data.model_dump()))
+            else:
+                for field, value in data.model_dump().items():
+                    setattr(link, field, value)
     await session.flush()
+    await session.refresh(release, ["links"])
     log.info("admin.release.updated", release_id=release.id)
     return await _to_out(session, release)
 
@@ -231,7 +275,7 @@ async def update_release(
 @router.post("/releases/{release_id}/publish", response_model=ReleaseAdminOut)
 async def publish_release(release_id: int, session: SessionDep, _: AdminDep) -> ReleaseAdminOut:
     """공개한다. 이 시점에 `SCHEDULE_ADDED` 이벤트가 **한 번만** 생긴다."""
-    release = await _load(session, release_id)
+    release = await _load(session, release_id, lock=True)
     release.is_published = True
 
     # **`is_published` 가 아니라 이벤트 존재 여부로 판단한다.**
@@ -268,7 +312,7 @@ async def unpublish_release(release_id: int, session: SessionDep, _: AdminDep) -
     **이미 나간 `SCHEDULE_ADDED` 이벤트는 지우지 않는다.** 구독자에게 전달된 사실은
     남아야 하고, 다시 공개해도 이벤트가 또 생기지는 않는다.
     """
-    release = await _load(session, release_id)
+    release = await _load(session, release_id, lock=True)
     release.is_published = False
     await session.flush()
     log.info("admin.release.unpublished", release_id=release.id)
@@ -277,23 +321,38 @@ async def unpublish_release(release_id: int, session: SessionDep, _: AdminDep) -
 
 @router.delete("/releases/{release_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_release(release_id: int, session: SessionDep, _: AdminDep) -> None:
-    """**한 번도 공개된 적 없는 초안만** 삭제할 수 있다.
+    """**초안만** 삭제할 수 있다. 공개 중이면 먼저 공개를 취소해야 한다 (T-133).
 
-    `is_published` 가 아니라 **이벤트 존재 여부**로 판단한다.
-    공개했다가 취소한 일정도 이미 구독자에게 나갔으므로 이력을 지우면 안 된다.
-    (`listing_events.release_id` 에 CASCADE 를 걸지 않은 것도 같은 이유다.)
+    이전에는 "한 번도 공개된 적 없는" 것만 지울 수 있었다. 발송 이력을 지키려는
+    규칙이었지만, 그 결과 **운영자가 남은 방법이 SQL 뿐**이 되었다.
+    손으로 여러 테이블을 순서대로 지우는 쪽이 훨씬 위험하다 — 한 줄 틀리면
+    남의 데이터까지 지운다. 그래서 가드를 여기로 옮긴다.
+
+    **공개 중인 것은 여전히 못 지운다.** 공개 취소를 한 번 거치게 해서,
+    실수로 살아 있는 일정을 지우는 일이 없도록 한 단계를 남긴다.
+
+    감수하는 것 — 이 발매에 대해 **무엇을 언제 보냈는지 기록이 사라진다.**
+    `notification_deliveries` 는 `listing_events` 의 CASCADE 로 함께 지워진다.
     """
-    release = await _load(session, release_id)
+    release = await _load(session, release_id, lock=True)
 
-    announced = await session.scalar(
-        select(ListingEvent.id).where(ListingEvent.release_id == release.id).limit(1)
-    )
-    if announced is not None:
+    if release.is_published:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "이미 공개된 적이 있는 일정은 삭제할 수 없습니다. 공개 취소로 숨기십시오.",
+            "공개 중인 일정은 삭제할 수 없습니다. 공개를 먼저 취소하십시오.",
         )
 
+    if await _linked_listing_exists(session, release.id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "수집된 상품이 연결되어 있어 삭제할 수 없습니다.",
+        )
+
+    # 이벤트는 `release_id` 에 CASCADE 가 없어 직접 지운다.
+    # 발송 기록(`notification_deliveries`)은 `event_id` CASCADE 로 함께 사라진다.
+    events = await session.execute(
+        delete(ListingEvent).where(ListingEvent.release_id == release.id)
+    )
     await session.delete(release)
     try:
         # **여기서 flush 하지 않으면 오류가 응답 뒤에 터진다.**
@@ -303,7 +362,12 @@ async def delete_release(release_id: int, session: SessionDep, _: AdminDep) -> N
         raise HTTPException(
             status.HTTP_409_CONFLICT, "다른 데이터가 참조 중이라 삭제할 수 없습니다."
         ) from exc
-    log.info("admin.release.deleted", release_id=release_id)
+    log.info(
+        "admin.release.deleted",
+        release_id=release_id,
+        title=release.title,
+        deleted_events=cast("CursorResult[Any]", events).rowcount,
+    )
 
 
 @router.post(
@@ -314,7 +378,7 @@ async def delete_release(release_id: int, session: SessionDep, _: AdminDep) -> N
 async def add_link(
     release_id: int, payload: ReleaseLinkIn, session: SessionDep, _: AdminDep
 ) -> ReleaseLinkOut:
-    release = await _load(session, release_id)
+    release = await _load(session, release_id, lock=True)
 
     if any(existing.url == payload.url for existing in release.links):
         raise HTTPException(status.HTTP_409_CONFLICT, "이미 등록된 구매처 URL 입니다.")

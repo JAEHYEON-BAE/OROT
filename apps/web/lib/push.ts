@@ -32,7 +32,8 @@ export function isPushSupported(): boolean {
 /** iOS 는 홈 화면에 추가하기 전에는 푸시를 아예 지원하지 않는다. */
 export function isIos(): boolean {
   if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent);
+  return (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 }
 
 /** 홈 화면(또는 설치된 앱)에서 실행 중인가. */
@@ -89,13 +90,11 @@ export async function getExistingSubscription(): Promise<PushSubscription | null
 
 /** 구독하고 서버에 등록한다. 이미 구독 중이면 그 구독을 다시 보낸다(서버가 갱신으로 처리). */
 export async function subscribe(): Promise<PushSubscription> {
-  const { publicKey, enabled } = await getPublicKey();
-  if (!enabled) throw new Error("서버에 푸시가 설정되어 있지 않습니다.");
-
-  // 권한 요청은 **반드시 사용자 제스처 안에서** 일어나야 한다.
-  // 페이지 로드 시점에 부르면 브라우저가 조용히 거부한다.
+  // Ask before any await/network call so Safari retains the click gesture.
   const permission = await Notification.requestPermission();
   if (permission !== "granted") throw new Error("알림 권한이 허용되지 않았습니다.");
+  const { publicKey, enabled } = await getPublicKey();
+  if (!enabled) throw new Error("서버에서 푸시 알림을 사용할 수 없습니다.");
 
   const registration = await registerServiceWorker();
   const existing = await registration.pushManager.getSubscription();
@@ -107,16 +106,18 @@ export async function subscribe(): Promise<PushSubscription> {
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     }));
 
-  const res = await fetch("/api/push/subscribe", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(subscription.toJSON()),
-  });
-  if (!res.ok) {
+  try {
+    const res = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    if (!res.ok) throw new Error(`구독 등록에 실패했습니다 (${res.status})`);
+  } catch (error) {
     // 서버가 모르는 구독은 알림이 오지 않는다. 브라우저 쪽만 남겨 두면
     // "구독 중"으로 보이는데 아무것도 안 오는 상태가 된다.
-    await subscription.unsubscribe().catch(() => undefined);
-    throw new Error(`구독 등록에 실패했습니다 (${res.status})`);
+    if (!existing) await subscription.unsubscribe().catch(() => undefined);
+    throw error;
   }
   return subscription;
 }
@@ -128,10 +129,12 @@ export async function unsubscribe(): Promise<void> {
 
   // 순서가 중요하다. 브라우저 구독을 먼저 취소하면 endpoint 를 잃어
   // 서버에 죽은 구독이 남고, 발송기가 계속 그쪽으로 요청을 보낸다.
-  await fetch("/api/push/subscribe", {
+  const response = await fetch("/api/push/subscribe", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ endpoint: subscription.endpoint }),
   });
-  await subscription.unsubscribe();
+  if (!response.ok) throw new Error(`구독 해지에 실패했습니다 (${response.status})`);
+  const removed = await subscription.unsubscribe();
+  if (!removed) throw new Error("브라우저 구독 해지를 완료하지 못했습니다. 다시 시도해 주세요.");
 }

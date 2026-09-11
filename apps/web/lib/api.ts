@@ -12,7 +12,7 @@ export type ReleaseLink = {
   shop_name: string;
   url: string;
   source_id: string | null;
-  price_krw: string | null;
+  price_krw: number | null;
 };
 
 export type Release = {
@@ -45,6 +45,7 @@ async function get<T>(path: string): Promise<T> {
     // 트래픽이 적고 응답이 작아 캐시로 얻을 것도 거의 없다.
     // API 쪽 ETag / Cache-Control 은 그대로 있으므로 CDN 계층에서는 여전히 캐시된다.
     cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${path}`);
@@ -52,8 +53,8 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export function getFeed(limit = 50) {
-  return get<{ items: FeedItem[]; generated_at: string }>(`/v1/feed?limit=${limit}`);
+export function getFeed(limit = 50, sort: "recent" | "imminent" = "imminent") {
+  return get<{ items: FeedItem[]; generated_at: string }>(`/v1/feed?limit=${limit}&sort=${sort}`);
 }
 
 export function getReleases(params: Record<string, string> = {}) {
@@ -62,3 +63,18 @@ export function getReleases(params: Record<string, string> = {}) {
 }
 
 export const apiBase = API_BASE;
+
+/** Calendar must follow the cursor; a first-page limit silently hides later dates. */
+export async function getAllReleases() {
+  const items: Release[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await getReleases(cursor ? { cursor } : {});
+    items.push(...page.items);
+    cursor = page.next_cursor;
+    if (cursor && seen.has(cursor)) throw new Error("반복된 페이지 커서입니다.");
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+  return { items };
+}
