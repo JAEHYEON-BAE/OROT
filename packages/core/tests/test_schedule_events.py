@@ -6,8 +6,8 @@
 
 from datetime import UTC, datetime, timedelta
 
-from vinyl_core.enums import EventType
-from vinyl_core.schedule_events import MAX_BACKFILL, PREORDER_SOON_LEAD
+from orot_core.enums import EventType
+from orot_core.schedule_events import MAX_BACKFILL, PREORDER_SOON_LEAD
 
 NOW = datetime(2026, 9, 20, 5, 0, tzinfo=UTC)
 

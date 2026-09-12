@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vinyl_api.pagination import (
+from orot_api.pagination import (
     MAX_LIMIT,
     InvalidCursorError,
     clamp_limit,

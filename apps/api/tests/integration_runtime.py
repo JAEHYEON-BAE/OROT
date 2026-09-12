@@ -9,25 +9,25 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+from orot_core.db import get_engine
+from orot_core.enums import DeliveryStatus, EventType
+from orot_core.models import Base, DeviceToken, ListingEvent, NotificationDelivery, Release
+from orot_core.notifications import SendOutcome, SendResult, dispatch_pending, plan_deliveries
+from orot_core.schedule_events import generate_due_events
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
-from vinyl_core.db import get_engine
-from vinyl_core.enums import DeliveryStatus, EventType
-from vinyl_core.models import Base, DeviceToken, ListingEvent, NotificationDelivery, Release
-from vinyl_core.notifications import SendOutcome, SendResult, dispatch_pending, plan_deliveries
-from vinyl_core.schedule_events import generate_due_events
 
-from vinyl_api.routers.admin import (
+from orot_api.routers.admin import (
     create_release,
     delete_release,
     publish_release,
     unpublish_release,
     update_release,
 )
-from vinyl_api.routers.calendar import releases_ics
-from vinyl_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseUpdate
+from orot_api.routers.calendar import releases_ics
+from orot_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseUpdate
 
 
 class FakeSender:

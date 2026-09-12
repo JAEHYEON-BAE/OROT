@@ -255,7 +255,7 @@ Cafe24 네이티브 예약 기능은 **사용하지 않습니다** (`is_reserve_
 | `crawl_interval_seconds` (일반 카테고리) | `1800` (30분) |
 | `crawl_interval_seconds` (Pre-Order `cate_no=42`) | **`300` (5분)** — 사유는 [ADR-0001](../adr/0001-preorder-open-detection.md) |
 | 요청 속도 | 0.5 req/s 이하, 동시 연결 2 이하 (블루프린트 §3.4) |
-| User-Agent | `VinylRadar/1.0 (+https://<도메인>/about; contact@<도메인>)` |
+| User-Agent | `OROT/1.0 (+https://<도메인>/about; contact@<도메인>)` |
 | 조건부 요청 | 응답에 `Last-Modified` 존재 → `If-Modified-Since` 사용 가능. `ETag`는 미관측 |
 
 > 응답 헤더에 `cache-control: no-store, no-cache` 가 있으나 `x-cache: HIT` / `x-ttl: 300` 으로
@@ -281,7 +281,7 @@ Cafe24 네이티브 예약 기능은 **사용하지 않습니다** (`is_reserve_
 
 ## 9-1. 구현 상태 (T-007 완료)
 
-어댑터: `packages/core/src/vinyl_core/adapters/gimbab.py`
+어댑터: `packages/core/src/orot_core/adapters/gimbab.py`
 골든 테스트: `packages/core/tests/test_adapter_gimbab.py` (29건)
 
 수집 카테고리는 `cate_no` **25(Vinyl) / 42(Pre-Order) / 43(Clearance)** 로 확정했습니다.

@@ -1,6 +1,6 @@
 import PushToggle from "./PushToggle";
 
-export const metadata = { title: "구독 — Vinyl Radar" };
+export const metadata = { title: "구독 — OROT" };
 export const dynamic = "force-dynamic";
 
 export default function SubscribePage() {

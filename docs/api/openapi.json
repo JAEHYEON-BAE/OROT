@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Vinyl Radar API",
+    "title": "OROT API",
     "description": "국내 바이닐 발매·재고 정보 통합 API",
     "version": "0.1.0"
   },

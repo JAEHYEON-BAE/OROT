@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from vinyl_api.deps import SessionDep
-from vinyl_api.pagination import InvalidCursorError, decode_cursor, encode_cursor
-from vinyl_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseUpdate
+from orot_api.deps import SessionDep
+from orot_api.pagination import InvalidCursorError, decode_cursor, encode_cursor
+from orot_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseUpdate
 
 
 @pytest.mark.parametrize("payload", [{"title": None}, {"title": "  "}, {"is_limited": None}])
@@ -58,7 +58,7 @@ def test_commit_failure_cannot_return_success(monkeypatch):
     session = AsyncMock()
     session.__aenter__.return_value = session
     session.commit.side_effect = RuntimeError("commit failed")
-    monkeypatch.setattr("vinyl_api.deps.get_session_factory", lambda: lambda: session)
+    monkeypatch.setattr("orot_api.deps.get_session_factory", lambda: lambda: session)
     app = FastAPI()
 
     @app.post("/write")

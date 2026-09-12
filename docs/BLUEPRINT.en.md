@@ -1,4 +1,4 @@
-# Vinyl Radar — Vinyl Release and Preorder Schedule Blueprint (English)
+# OROT — Vinyl Release and Preorder Schedule Blueprint (English)
 
 > **Reviewed: 2026-09-11 · Version 1.1.0**. Current behavior is described from source, migrations and runtime configuration.
 > When implementation and prose disagree, update the prose to match implementation. Planned features are not current behavior or instructions to enable them.
@@ -16,6 +16,21 @@
 8. Preserve existing data, keys and backups. Destructive actions require authorization; prefer isolated schemas and rollback in tests. Shared-DB cleanup must use exact IDs created by that test run.
 
 ---
+
+### Service name and compatibility with existing installations
+
+The service display name and project directory are **OROT**. Tool identifiers use
+`orot`, `orot-core`/`orot-api`/`orot-collector`/`orot-web`, and Python imports use
+`orot_core`/`orot_api`/`orot_collector`. The word vinyl in record materials or original
+source-site content is not a service name and remains intact.
+Existing RSS GUID and iCalendar UID namespaces remain in `orot_api/feed_identity.py`
+to avoid duplicating subscribed items. Display names and download filenames use OROT.
+Existing installations retain DB connection settings and use `POSTGRES_VOLUME_NAME`,
+`POSTGRES_VOLUME_EXTERNAL=true` and `ENV_BACKUP_KEYCHAIN_SERVICE` in `.env` to preserve
+DB and encrypted-backup access. Do not blindly rename physical DB roles, volumes or
+keychain identities. New defaults are `orot`, `orot_postgres_data` and `orot-env-backup`.
+When moving the directory, update local venv paths, LaunchAgents and Compose source mounts.
+Rebranding does not change VAPID keys, public URLs or PWA start_url/scope.
 
 ## 1. Problem Definition
 
@@ -118,13 +133,13 @@ are wired only for manual `collector run --dry-run`; scheduled collection and pe
 
 ### 3.1 Implemented Adapter Interface
 
-`packages/core/src/vinyl_core/adapters/base.py` defines the contract. `@register` and module discovery
+`packages/core/src/orot_core/adapters/base.py` defines the contract. `@register` and module discovery
 handle registration without registry edits. A new source still needs fixtures, tests, survey notes and seed data.
 
 ```python
 from collections.abc import AsyncIterator
 from typing import Protocol
-from vinyl_core.adapters.base import RawItem
+from orot_core.adapters.base import RawItem
 
 class PageFetcher(Protocol):
     async def fetch_text(self, url: str) -> str | None: ...
@@ -143,7 +158,7 @@ class SourceAdapter(Protocol):
 Required RawItem fields are source_id, source_item_id, url, title_raw and stock_status.
 Optional metadata defaults to None, extra to a new dict, and fetched_at to current UTC. Won prices reject
 negative/fractional values; fetched_at requires a timezone. Parse failures return an empty list and log the failure.
-`vinyl_collector.bridge.FetcherPageAdapter` supplies PageFetcher without importing collector into core.
+`orot_collector.bridge.FetcherPageAdapter` supplies PageFetcher without importing collector into core.
 
 ### 3.2 Source Survey and Implementation Notes
 
@@ -204,7 +219,7 @@ Agents must encode these rules without exception.
 |---|---|
 | Honor robots.txt | Parse with `urllib.robotparser` at the start of each crawl. Never request `Disallow`ed paths |
 | Rate limiting | **Max 0.5 req/s per source**, ≤ 2 concurrent connections. `asyncio.Semaphore` plus jitter |
-| Identify yourself | `User-Agent: VinylRadar/1.0 (+https://<domain>/about; contact@<domain>)` |
+| Identify yourself | `User-Agent: OROT/1.0 (+https://<domain>/about; contact@<domain>)` |
 | Conditional requests | Cache ETag / Last-Modified to minimize traffic |
 | Minimize reuse of protected content | **Store metadata only** (title, artist, price, stock, release date). Do not store product descriptions or review text. Store thumbnail URLs only; never copy images to your own CDN |
 | Attribution | Display the source name on every surface and out-link to the original product page |
@@ -672,7 +687,7 @@ compose.yaml / compose.prod.yaml / Makefile / .env.example
 .vscode/{settings,extensions}.json
 apps/
   api/
-    src/vinyl_api/
+    src/orot_api/
       main.py / deps.py
       routers/{admin,admin_ui,releases,feed,rss,calendar,push}.py
       schemas/{release,push}.py
@@ -681,7 +696,7 @@ apps/
     tests/                         # integration_runtime.py + test_*.py
     pyproject.toml / Dockerfile
   collector/
-    src/vinyl_collector/
+    src/orot_collector/
       cli.py / scheduler.py / push_sender.py / slack_alerter.py / fetcher.py / bridge.py
     tests/fixtures/<source_id>/*.html
     pyproject.toml / Dockerfile
@@ -696,14 +711,14 @@ apps/
     tests/*.test.mjs
     package.json / package-lock.json / next.config.ts / Dockerfile
 packages/core/
-  src/vinyl_core/
+  src/orot_core/
     models/{base,artist,release,listing,source,user}.py
     adapters/{base,registry,gimbab,secondtrack,poclanos}.py
     db.py / settings.py / seed.py / enums.py / logging.py / testing.py
     schedule_events.py / notifications.py / alerts.py
   tests/ / pyproject.toml
 migrations/versions/ / alembic.ini
-infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
+infra/{env-backup,env-restore,orot-start,orot-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
 .github/workflows/ci.yml            # T-012 Python + web verification
@@ -711,7 +726,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**Reserved future paths:** `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector `pipeline.py`,
+**Reserved future paths:** `apps/ios/`, `apps/api/src/orot_api/services/`, collector `pipeline.py`,
 core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
 `infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh` and `.devcontainer/` do not exist.
 These are reserved for future tasks; their listing does not authorize creating or activating them.
@@ -777,8 +792,8 @@ The counter-argument is stated fairly: if shipping something to iOS quickly matt
 ### 8.2 Native App Structure
 
 ```
-VinylRadar/
-├─ VinylRadarApp.swift              @main, DI container
+OROT/
+├─ OROTApp.swift              @main, DI container
 ├─ Core/
 │  ├─ APIClient.swift               URLSession + async/await
 │  ├─ Generated/                    swift-openapi-generator output
@@ -816,7 +831,7 @@ NotificationDispatcher (FastAPI background task)
    ↓
 aioapns → APNs (token-based auth, .p8 key)
    ↓
-iOS: NotificationHandler → deep link vinylradar://release/1042
+iOS: NotificationHandler → deep link orot://release/1042
 ```
 
 **Prerequisites**: Apple Developer Program ($99/yr), APNs Auth Key (.p8), Bundle ID, Push Notifications capability.
@@ -913,7 +928,7 @@ results, not a substitute for a fresh run. Documentation work must not start ser
 - `make backup` pipes pg_dump through gzip into backups/. It detects pipeline failure and removes failed artifacts.
 - `make restore FILE=...` prompts first, then applies successfully decompressed SQL with psql in one transaction,
   stopping on SQL errors. It overwrites current data and requires authorization and a prior backup. Test restores in a separate DB.
-- `make backup-prune` retains 30 DB backups. infra/vinyl-radar-backup.sh runs backup, prune and .env backup
+- `make backup-prune` retains 30 DB backups. infra/orot-backup.sh runs backup, prune and .env backup
   when the DB is running; it skips when DB is stopped and logs a warning if .env backup fails.
 - infra/env-backup.sh encrypts .env and infra/env-restore.sh restores it. ENV_BACKUP_DIR defaults to
   **local project storage**, backups/env; off-disk storage must be configured separately. Default retention is 10;
@@ -932,7 +947,7 @@ The address used in this session is https://jaehyeonui-macmini.tail598a5f.ts.net
 registration with `tailscale funnel status`. Code and DB remain on the Mac mini. Expose only web; API/admin/DB
 ports stay on loopback. Do not add an unrestricted API proxy to the web.
 
-After reboot, `colima start` followed by `make prod` starts the stack. infra/vinyl-radar-start.sh also checks
+After reboot, `colima start` followed by `make prod` starts the stack. infra/orot-start.sh also checks
 colima, runs Compose up and polls API health, but does not build images. Docker restart policies apply only
 while the engine is running; they do not guarantee host login or daemon startup.
 

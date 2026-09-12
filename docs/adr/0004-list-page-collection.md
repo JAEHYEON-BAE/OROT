@@ -114,8 +114,8 @@ CSS 셀렉터에만 의존하게 되어 사이트 개편에 더 취약하다.
 
 ## 7. 영향 범위
 
-- `packages/core/src/vinyl_core/adapters/base.py` — 프로토콜
-- `packages/core/src/vinyl_core/adapters/gimbab.py` — 목록 기반으로 전환
-- `apps/collector/src/vinyl_collector/cli.py` — dry-run 출력
+- `packages/core/src/orot_core/adapters/base.py` — 프로토콜
+- `packages/core/src/orot_core/adapters/gimbab.py` — 목록 기반으로 전환
+- `apps/collector/src/orot_collector/cli.py` — dry-run 출력
 - 블루프린트 §3.1 / §3.2 / §3.3 — `.ko` / `.en` 동시 수정 (CLAUDE.md §9)
 - T-014(secondtrack)는 같은 방식으로 구현한다. T-016(poclanos)은 상세 1건 반환 형태를 쓴다

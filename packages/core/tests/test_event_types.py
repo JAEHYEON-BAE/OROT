@@ -3,7 +3,7 @@
 같은 목록이 네 군데 있다.
   1. `EventType` enum
   2. `listing_events` 의 CHECK 제약 (모델 + 마이그레이션)
-  3. 알림 라벨 (`vinyl_core.notifications`)
+  3. 알림 라벨 (`orot_core.notifications`)
   4. 화면 라벨 (`routers/rss.py`, `apps/web/lib/format.ts`)
 
 enum 에만 값을 더하면 **INSERT 가 런타임에 제약 위반으로 죽고**, 라벨만 빠뜨리면
@@ -13,9 +13,9 @@ enum 에만 값을 더하면 **INSERT 가 런타임에 제약 위반으로 죽�
 import re
 from pathlib import Path
 
-from vinyl_core.enums import EventType
-from vinyl_core.models import ListingEvent
-from vinyl_core.notifications import _EVENT_LABEL, NOTIFIABLE
+from orot_core.enums import EventType
+from orot_core.models import ListingEvent
+from orot_core.notifications import _EVENT_LABEL, NOTIFIABLE
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -66,7 +66,7 @@ def test_notifiable_events_are_all_time_driven() -> None:
 
 def test_rss_labels_cover_every_notifiable_event() -> None:
     """알림에서 '일정 변동'이라 본 것이 RSS 에서 원문이면 같은 일로 읽히지 않는다."""
-    source = (REPO_ROOT / "apps/api/src/vinyl_api/routers/rss.py").read_text(encoding="utf-8")
+    source = (REPO_ROOT / "apps/api/src/orot_api/routers/rss.py").read_text(encoding="utf-8")
     labelled = set(re.findall(r"EventType\.([A-Z_]+)\.value:", source))
     missing = {e.name for e in NOTIFIABLE} - labelled
     assert not missing, f"RSS 라벨 누락: {missing}"

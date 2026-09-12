@@ -21,7 +21,7 @@ jobs:
     env:
       ENVIRONMENT: local
       ADMIN_API_KEY: ci-only-admin-key
-      DATABASE_URL: postgresql+asyncpg://vinyl:ci-only-password@127.0.0.1:5432/vinyl_ci
+      DATABASE_URL: postgresql+asyncpg://orot:ci-only-password@127.0.0.1:5432/orot_ci
       PUBLIC_WEB_URL: http://localhost:3000
       VAPID_PUBLIC_KEY: ""
       VAPID_PRIVATE_KEY: ""
@@ -31,13 +31,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: vinyl
+          POSTGRES_USER: orot
           POSTGRES_PASSWORD: ci-only-password
-          POSTGRES_DB: vinyl_ci
+          POSTGRES_DB: orot_ci
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U vinyl -d vinyl_ci"
+          --health-cmd "pg_isready -U orot -d orot_ci"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10

@@ -3,8 +3,8 @@
 DB 연결 없이 `Base.metadata` 만 검사한다.
 """
 
-from vinyl_core.enums import Curation, EventType
-from vinyl_core.models import Base, ListingEvent, MergeCandidate, Release, ReleaseLink
+from orot_core.enums import Curation, EventType
+from orot_core.models import Base, ListingEvent, MergeCandidate, Release, ReleaseLink
 
 
 def test_release_has_schedule_fields() -> None:
@@ -65,14 +65,14 @@ def test_curation_distinguishes_manual_from_crawled() -> None:
 
 def test_push_subscription_needs_no_account() -> None:
     """Web Push 는 구독 자체가 식별자다 — 계정 시스템(M4) 전에도 구독할 수 있어야 한다."""
-    from vinyl_core.models import DeviceToken
+    from orot_core.models import DeviceToken
 
     assert DeviceToken.__table__.c.user_id.nullable is True
 
 
 def test_web_push_keys_are_stored() -> None:
     """RFC 8291 암호화에 `p256dh` 와 `auth` 가 필요하다. IOS 에는 없으므로 NULL 허용."""
-    from vinyl_core.models import DeviceToken
+    from orot_core.models import DeviceToken
 
     columns = DeviceToken.__table__.c
     assert columns.p256dh.nullable is True
@@ -81,7 +81,7 @@ def test_web_push_keys_are_stored() -> None:
 
 def test_subscription_is_unique_per_platform_and_token() -> None:
     """같은 엔드포인트로 두 번 구독하면 알림이 두 번 간다."""
-    from vinyl_core.models import DeviceToken
+    from orot_core.models import DeviceToken
 
     uniques = {
         tuple(sorted(c.name for c in constraint.columns))
@@ -96,7 +96,7 @@ def test_delivery_is_unique_per_event_and_device() -> None:
 
     이 제약 하나가 스케줄러 재기동·중복 실행에도 재발송을 막는다.
     """
-    from vinyl_core.models import NotificationDelivery
+    from orot_core.models import NotificationDelivery
 
     uniques = {
         tuple(sorted(c.name for c in constraint.columns))
@@ -108,6 +108,6 @@ def test_delivery_is_unique_per_event_and_device() -> None:
 
 def test_delivery_status_values() -> None:
     """`EXPIRED` 는 구독 만료(404/410)다 — 재시도하지 않고 구독을 끈다."""
-    from vinyl_core.enums import DeliveryStatus
+    from orot_core.enums import DeliveryStatus
 
     assert {s.value for s in DeliveryStatus} == {"PENDING", "SENT", "FAILED", "EXPIRED"}

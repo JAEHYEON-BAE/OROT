@@ -9,8 +9,8 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Vinyl Radar — 바이닐 발매·예약 일정",
-    short_name: "Vinyl Radar",
+    name: "OROT — 바이닐 발매·예약 일정",
+    short_name: "OROT",
     description:
       "국내 바이닐(LP) 신규 발매와 예약판매 일정을 한곳에서. 한정반 예약 시작을 놓치지 마세요.",
     // 알림을 눌러 들어온 뒤에도 홈으로 돌아갈 수 있도록 루트로 둔다.

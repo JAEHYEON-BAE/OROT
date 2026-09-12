@@ -10,11 +10,11 @@
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from vinyl_core.enums import EventType
-from vinyl_core.models import Release
-from vinyl_core.schedule_events import STALE_ON_CHANGE
+from orot_core.enums import EventType
+from orot_core.models import Release
+from orot_core.schedule_events import STALE_ON_CHANGE
 
-from vinyl_api.routers.admin import SCHEDULE_FIELDS, _schedule_snapshot
+from orot_api.routers.admin import SCHEDULE_FIELDS, _schedule_snapshot
 
 OPENS = datetime(2026, 10, 1, 5, 0, tzinfo=UTC)
 LATER = datetime(2026, 10, 2, 5, 0, tzinfo=UTC)
@@ -84,7 +84,7 @@ def test_only_published_releases_emit_the_event() -> None:
     """
     source = (
         __import__("pathlib").Path(__file__).resolve().parents[3]
-        / "apps/api/src/vinyl_api/routers/admin.py"
+        / "apps/api/src/orot_api/routers/admin.py"
     ).read_text(encoding="utf-8")
     assert "if release.is_published and changed:" in source
     # 변경된 필드만 넘겨야 영향 없는 이벤트가 무효화되지 않는다.
@@ -135,7 +135,7 @@ def test_superseding_marks_rather_than_deletes() -> None:
     보낸 사실은 취소되지 않는다 — 무효 표시만 한다.
     """
     source = (
-        Path(__file__).resolve().parents[3] / "packages/core/src/vinyl_core/schedule_events.py"
+        Path(__file__).resolve().parents[3] / "packages/core/src/orot_core/schedule_events.py"
     ).read_text(encoding="utf-8")
     body = source.split("async def supersede_stale_events")[1]
     assert "update(ListingEvent)" in body
@@ -146,7 +146,7 @@ def test_superseding_marks_rather_than_deletes() -> None:
 def test_already_superseded_events_are_not_restamped() -> None:
     """두 번 무효화하면 '언제 무효가 되었는가'를 알 수 없게 된다."""
     source = (
-        Path(__file__).resolve().parents[3] / "packages/core/src/vinyl_core/schedule_events.py"
+        Path(__file__).resolve().parents[3] / "packages/core/src/orot_core/schedule_events.py"
     ).read_text(encoding="utf-8")
     body = source.split("async def supersede_stale_events")[1]
     assert "ListingEvent.superseded_at.is_(None)" in body
@@ -159,7 +159,7 @@ def test_idempotency_check_ignores_superseded_events() -> None:
     이 제품이 유일하게 놓치면 안 되는 순간이다.
     """
     source = (
-        Path(__file__).resolve().parents[3] / "packages/core/src/vinyl_core/schedule_events.py"
+        Path(__file__).resolve().parents[3] / "packages/core/src/orot_core/schedule_events.py"
     ).read_text(encoding="utf-8")
     body = source.split("async def _existing_event_release_ids")[1].split("async def ")[0]
     assert "superseded_at.is_(None)" in body
@@ -170,7 +170,7 @@ def test_idempotency_check_ignores_superseded_events() -> None:
 
 def _admin_source() -> str:
     return (
-        Path(__file__).resolve().parents[3] / "apps/api/src/vinyl_api/routers/admin.py"
+        Path(__file__).resolve().parents[3] / "apps/api/src/orot_api/routers/admin.py"
     ).read_text(encoding="utf-8")
 
 
@@ -186,7 +186,7 @@ def test_delete_guard_and_ui_share_one_judgement() -> None:
     assert "if release.is_published:" in source
 
     ui = (
-        Path(__file__).resolve().parents[3] / "apps/api/src/vinyl_api/routers/admin_ui.py"
+        Path(__file__).resolve().parents[3] / "apps/api/src/orot_api/routers/admin_ui.py"
     ).read_text(encoding="utf-8")
     assert "r.can_delete" in ui
 

@@ -5,7 +5,7 @@
 #
 # 개발용 compose.yaml 과 나누어 둔 이유: 한 파일에 두 모드를 섞으면 개발 중에
 # 실수로 운영 설정이 섞여 들어가거나, 반대로 운영에 `next dev` 가 올라간다.
-name: vinyl-radar
+name: orot
 
 services:
   api:

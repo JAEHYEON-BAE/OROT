@@ -17,7 +17,9 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-KEYCHAIN_SERVICE="vinyl-radar-env-backup"
+# An existing installation may retain its original keychain identity.
+KEYCHAIN_SERVICE="${ENV_BACKUP_KEYCHAIN_SERVICE:-$(sed -n 's/^ENV_BACKUP_KEYCHAIN_SERVICE=//p' .env 2>/dev/null | tail -1)}"
+KEYCHAIN_SERVICE="${KEYCHAIN_SERVICE:-orot-env-backup}"
 SOURCE="${ENV_FILE:-.env}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }

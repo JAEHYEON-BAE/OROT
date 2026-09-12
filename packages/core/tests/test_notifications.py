@@ -5,8 +5,8 @@ DB 없이 순수 로직만 검사한다. 배송 흐름은 컨테이너에서 가
 
 from datetime import timedelta
 
-from vinyl_core.enums import EventType
-from vinyl_core.notifications import (
+from orot_core.enums import EventType
+from orot_core.notifications import (
     MAX_BATCH,
     MAX_NOTIFY_AGE,
     NOTIFIABLE,

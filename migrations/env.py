@@ -1,6 +1,6 @@
 """Alembic 실행 환경.
 
-접속 문자열은 `vinyl_core.settings` 한 곳에서만 읽는다 (alembic.ini 에 중복 정의하지 않는다).
+접속 문자열은 `orot_core.settings` 한 곳에서만 읽는다 (alembic.ini 에 중복 정의하지 않는다).
 드라이버가 asyncpg 이므로 비동기 엔진으로 마이그레이션을 실행한다.
 """
 
@@ -12,8 +12,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from vinyl_core.models import Base
-from vinyl_core.settings import get_settings
+from orot_core.models import Base
+from orot_core.settings import get_settings
 
 config = context.config
 

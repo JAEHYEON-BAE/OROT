@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from vinyl_core.adapters import StockStatus
-from vinyl_core.adapters.gimbab import VINYL_CATEGORY_IDS, GimbabAdapter
+from orot_core.adapters import StockStatus
+from orot_core.adapters.gimbab import VINYL_CATEGORY_IDS, GimbabAdapter
 
 FIXTURES = Path(__file__).resolve().parents[3] / "apps/collector/tests/fixtures/gimbab"
 
@@ -361,7 +361,7 @@ def test_raw_item_has_no_length_limit_on_text_fields() -> None:
     Pydantic 에 `max_length` 가 붙으면 초과분이 오류가 되거나 잘린다.
     DB 쪽은 전부 TEXT 라 제한이 없다.
     """
-    from vinyl_core.adapters.base import RawItem
+    from orot_core.adapters.base import RawItem
 
     long_title = "가" * 5000
     item = RawItem(

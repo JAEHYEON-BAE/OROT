@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vinyl-core"
+name = "orot-core"
 version = "0.1.0"
-description = "Vinyl Radar 공용 코어 — 어댑터·모델·정규화·병합·이벤트"
+description = "OROT 공용 코어 — 어댑터·모델·정규화·병합·이벤트"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7,<3",
@@ -30,7 +30,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-vinyl_core = ["py.typed", "*.yaml"]
+orot_core = ["py.typed", "*.yaml"]
 
 # ─── ruff ──────────────────────────────────────────────────────
 [tool.ruff]

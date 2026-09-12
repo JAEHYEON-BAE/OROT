@@ -10,14 +10,14 @@ from email.utils import parsedate_to_datetime
 
 import pytest
 
-from vinyl_api.rss import RssBuilder, escape, rfc822
+from orot_api.rss import RssBuilder, escape, rfc822
 
 WHEN = datetime(2026, 8, 27, 7, 33, 2, tzinfo=UTC)
 
 
 def _build() -> str:
     feed = RssBuilder(
-        title="Vinyl Radar",
+        title="OROT",
         link="https://example.com",
         description="설명 & 특수문자",
         self_url="https://example.com/v1/feed.rss",

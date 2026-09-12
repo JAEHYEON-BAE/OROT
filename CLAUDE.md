@@ -1,4 +1,4 @@
-# CLAUDE.md — Vinyl Radar Agent Context
+# CLAUDE.md — OROT Agent Context
 
 This file is loaded automatically by Claude Code at the start of every session. Read it fully before acting.
 
@@ -6,7 +6,7 @@ This file is loaded automatically by Claude Code at the start of every session. 
 
 ## 1. What this project is
 
-Vinyl Radar is a **release-schedule notification service** for Korean vinyl (LP) — not a sales database.
+OROT is a **release-schedule notification service** for Korean vinyl (LP) — not a sales database.
 It gathers new-release and preorder schedules into one subscribable feed and notifies collectors
 **at the moment preorders open**, so limited pressings are not missed.
 
@@ -115,6 +115,8 @@ do not start/rebuild services or send notifications just to validate prose.
 - Blueprint §6 distinguishes the current tree from reserved future paths. Verify actual files before citing a module.
 
 ### Naming
+- Service/project name: **OROT**. Tool identifiers: `orot`; Python packages: `orot_*`.
+- Preserve existing feed UID/GUID namespaces and physical DB/backup identities during renames.
 - `source_id` values are lowercase ASCII slugs: `gimbab`, `secondtrack`, `poclanos`.
 - Database and JSON fields are `snake_case`. The current web client manually types the API subset it uses in `apps/web/lib/api.ts`. Keep those types aligned with API schemas; no Swift client exists yet.
 - Fields suffixed `_raw` hold source text verbatim. **Never normalize in place;** normalized values live in `_norm` fields.
@@ -140,7 +142,7 @@ Do these in order. Each step is part of the same task.
 
 1. Write `docs/adapters/<source_id>.md` containing: robots.txt verbatim, relevant ToS clauses with your reading of them, listing URL and pagination pattern, whether JS rendering is required, a selector table for all eight fields, and whether JSON-LD / OpenGraph structured data is available.
 2. Save ≥ 3 HTML fixtures under `apps/collector/tests/fixtures/<source_id>/` — one in-stock, one sold-out, one preorder.
-3. Implement `packages/core/src/vinyl_core/adapters/<source_id>.py` against the `SourceAdapter` protocol. **Prefer structured data over CSS selectors when available.**
+3. Implement `packages/core/src/orot_core/adapters/<source_id>.py` against the `SourceAdapter` protocol. **Prefer structured data over CSS selectors when available.**
 4. Write golden tests asserting every `RawItem` field for each fixture.
 5. Add a row to the `sources` seed data.
 6. A parser canary remains planned; `.github/workflows/parser-canary.yml` does not exist. Do not claim a new adapter is monitored automatically.
@@ -300,7 +302,7 @@ out of enduring rules.
   **영향받는 이벤트만** 무효화한다 (예약 마감만 고쳤는데 예약 시작을 무효화하면 중복 발송)
 - **일정 변경은 이벤트를 지우지 않고 무효화한다.** 운영자가 비공개 발매 자체를 삭제하는
   경우에는 예외로 그 발매의 이벤트·배송 기록도 삭제된다 (T-133).
-- **피드는 발매당 한 줄** (`vinyl_api/feed_query.py` + `routers/feed.py`).
+- **피드는 발매당 한 줄** (`orot_api/feed_query.py` + `routers/feed.py`).
   `/v1/feed` 는 공개 음반을 먼저 정렬·제한한 뒤 최신 이벤트를 붙인다. RSS 는
   `latest_event_per_release()` 로 이벤트가 있는 음반만 고른다. 최신 이벤트 선택 도우미만 공유한다
 - **기기 알림은 반대로 묶지 않는다** (T-131). `tag = release-<id>-<event_type>`.
@@ -321,7 +323,7 @@ out of enduring rules.
   HTTP 상태나 예외 클래스명만 남긴다
 - **문자열로 HTML 을 만들면 반드시 이스케이프한다.** 관리 UI 의 운영자 키가 `sessionStorage`
   에 있어, 거기서의 XSS 는 곧 운영자 권한 탈취다
-- **엣지 케이스는 한 카탈로그에 모은다** (`vinyl_core/testing.py`). 경로마다 따로 만들면
+- **엣지 케이스는 한 카탈로그에 모은다** (`orot_core/testing.py`). 경로마다 따로 만들면
   한쪽만 고쳐지고 다른 쪽이 조용히 깨진다. 검증은 격리 스키마/트랜잭션을 우선하며,
   공유 DB 정리는 해당 실행에서 생성한 정확한 ID 로만 한다. 제목 접두사를 삭제 권한으로 삼지 않는다
 - **필드 간 관계 검증은 `@model_validator` 로** — 별도 메서드는 새 엔드포인트에서 빠뜨릴 수 있다.

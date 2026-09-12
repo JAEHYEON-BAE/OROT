@@ -60,10 +60,10 @@ DB 기반 억제는 채택되지 않았으며, 이 문서 정정으로 설정이
 - 보안: 설정의 DB URL·관리자 키·VAPID 개인키·웹훅 URL은 repr에서 제외한다.
   HTTP 전송 예외는 클래스명만 기록하여 URL이 섞인 예외 문자열을 남기지 않는다.
 
-근거: [스케줄러](../../apps/collector/src/vinyl_collector/scheduler.py),
-[Slack 발송기](../../apps/collector/src/vinyl_collector/slack_alerter.py),
-[경보 억제](../../packages/core/src/vinyl_core/alerts.py),
-[설정](../../packages/core/src/vinyl_core/settings.py).
+근거: [스케줄러](../../apps/collector/src/orot_collector/scheduler.py),
+[Slack 발송기](../../apps/collector/src/orot_collector/slack_alerter.py),
+[경보 억제](../../packages/core/src/orot_core/alerts.py),
+[설정](../../packages/core/src/orot_core/settings.py).
 
 T-012 작업에서는 운영 웹훅 설정이나 실제 Slack 수신을 검증하지 않았다.
 초기 기록의 테스트 수치는 당시 결과이며 최신 검증 결과는

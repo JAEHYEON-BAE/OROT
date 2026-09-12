@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy.dialects import postgresql
 
-from vinyl_api.feed_query import latest_event_per_release
+from orot_api.feed_query import latest_event_per_release
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -61,7 +61,7 @@ def test_feed_and_rss_use_the_same_query() -> None:
     각자 질의를 들고 있으면 한쪽만 고쳐지고 다른 쪽이 조용히 어긋난다.
     """
     for module in ("routers/feed.py", "routers/rss.py"):
-        source = (REPO_ROOT / "apps/api/src/vinyl_api" / module).read_text(encoding="utf-8")
+        source = (REPO_ROOT / "apps/api/src/orot_api" / module).read_text(encoding="utf-8")
         assert "latest_event_per_release" in source, module
         # 예전 질의가 남아 있으면 접힘이 적용되지 않는다.
         assert "select(ListingEvent, Release)" not in source, f"{module} 에 옛 질의가 남아 있다"

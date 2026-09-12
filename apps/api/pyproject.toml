@@ -3,12 +3,12 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vinyl-api"
+name = "orot-api"
 version = "0.1.0"
-description = "Vinyl Radar REST API (FastAPI)"
+description = "OROT REST API (FastAPI)"
 requires-python = ">=3.12"
 dependencies = [
-    "vinyl-core",
+    "orot-core",
     "fastapi>=0.121,<1",
     "uvicorn[standard]>=0.29,<1",
     "pywebpush>=2.0,<3",

@@ -10,8 +10,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import Numeric
 
-from vinyl_core.enums import DevicePlatform, EventType, SourceKind, WatchTargetType
-from vinyl_core.models import Base, Listing
+from orot_core.enums import DevicePlatform, EventType, SourceKind, WatchTargetType
+from orot_core.models import Base, Listing
 
 # 블루프린트 §4.2 가 정의한 테이블 전부.
 EXPECTED_TABLES = {

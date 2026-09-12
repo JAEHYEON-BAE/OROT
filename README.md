@@ -1,4 +1,4 @@
-# Vinyl Radar
+# OROT
 
 국내 바이닐의 **발매 일정과 예약판매 기간을 구독하고 알림을 받는 서비스**입니다.
 현재는 운영자가 일정을 입력하고, 사용자는 웹 피드·캘린더·RSS·iCalendar·Web Push로 확인합니다.
@@ -124,3 +124,12 @@ Fetcher와 gimbab/secondtrack/poclanos 어댑터는 있으나 주기 수집·DB 
 소스 자동 비활성화·수집 장애 운영자 알림·파서 카나리는 아직 없으며 robots 파서 한계는 ADR-0003에 기록되어 있습니다.
 
 전체 명령은 `make help`, 구현과 계획의 구분은 블루프린트 §2·§5·§6·§9·§10을 참고하십시오.
+
+
+## 이름 규칙
+
+서비스 표기는 **OROT**, 기술 식별자는 `orot`을 사용합니다. Python 패키지는
+`orot_core`·`orot_api`·`orot_collector`, 프로젝트 경로는
+`/Users/jaehyeon/PersonalProjects/OROT`입니다.
+기존 구독의 고정 UID/GUID와 운영 DB·백업 키체인 식별자는 호환성을 위해 보존합니다.
+`vinyl`이 음반 재질이나 외부 사이트 원문을 뜻하는 경우에도 변경하지 않습니다.

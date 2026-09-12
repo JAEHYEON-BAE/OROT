@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+from orot_core.models import DeviceToken
+from orot_core.notifications import SendOutcome
 from requests.adapters import BaseAdapter
-from vinyl_core.models import DeviceToken
-from vinyl_core.notifications import SendOutcome
 
-from vinyl_collector.push_sender import WebPushSender, _PushSession, _send_push
+from orot_collector.push_sender import WebPushSender, _PushSession, _send_push
 
 
 class RedirectAdapter(BaseAdapter):
@@ -41,7 +41,7 @@ def test_push_redirect_cannot_reach_internal_network():
 
 def test_redirect_is_not_reported_as_success(monkeypatch):
     monkeypatch.setattr(
-        "vinyl_collector.push_sender.webpush",
+        "orot_collector.push_sender.webpush",
         lambda **kwargs: SimpleNamespace(status_code=307),
     )
     from pywebpush import WebPushException
@@ -53,7 +53,7 @@ def test_redirect_is_not_reported_as_success(monkeypatch):
 @pytest.mark.asyncio
 async def test_malformed_stored_endpoint_does_not_crash_sender(monkeypatch):
     monkeypatch.setattr(
-        "vinyl_collector.push_sender.get_settings",
+        "orot_collector.push_sender.get_settings",
         lambda: SimpleNamespace(
             push_enabled=True, vapid_private_key="unused", vapid_subject="mailto:test@example.com"
         ),
@@ -67,7 +67,7 @@ async def test_malformed_stored_endpoint_does_not_crash_sender(monkeypatch):
 @pytest.mark.asyncio
 async def test_exception_details_do_not_leak_subscription_secrets(monkeypatch):
     monkeypatch.setattr(
-        "vinyl_collector.push_sender.get_settings",
+        "orot_collector.push_sender.get_settings",
         lambda: SimpleNamespace(
             push_enabled=True, vapid_private_key="unused", vapid_subject="mailto:test@example.com"
         ),
@@ -76,7 +76,7 @@ async def test_exception_details_do_not_leak_subscription_secrets(monkeypatch):
     def fail(**kwargs):
         raise ValueError("secret-endpoint-and-key")
 
-    monkeypatch.setattr("vinyl_collector.push_sender._send_push", fail)
+    monkeypatch.setattr("orot_collector.push_sender._send_push", fail)
     result = await WebPushSender().send(
         DeviceToken(token="https://fcm.googleapis.com/send/a", p256dh="key", auth="auth"), {}
     )
@@ -90,7 +90,7 @@ async def test_push_service_status_classification(monkeypatch, status):
     from pywebpush import WebPushException
 
     monkeypatch.setattr(
-        "vinyl_collector.push_sender.get_settings",
+        "orot_collector.push_sender.get_settings",
         lambda: SimpleNamespace(
             push_enabled=True, vapid_private_key="unused", vapid_subject="mailto:test@example.com"
         ),
@@ -101,7 +101,7 @@ async def test_push_service_status_classification(monkeypatch, status):
             "synthetic service error", response=SimpleNamespace(status_code=status)
         )
 
-    monkeypatch.setattr("vinyl_collector.push_sender._send_push", fail)
+    monkeypatch.setattr("orot_collector.push_sender._send_push", fail)
     result = await WebPushSender().send(
         DeviceToken(token="https://fcm.googleapis.com/send/a", p256dh="key", auth="auth"), {}
     )

@@ -1,13 +1,13 @@
-name: vinyl-radar
+name: orot
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-vinyl}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vinyl_local_dev_only}
-      POSTGRES_DB: ${POSTGRES_DB:-vinyl_radar}
+      POSTGRES_USER: ${POSTGRES_USER:-orot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orot_local_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-orot}
     ports:
       # **127.0.0.1 에만 묶는다.** 이 맥은 en0 에 공인 IP 가 직접 붙어 있어서,
       # 주소를 생략하면 0.0.0.0 에 바인딩되어 인터넷에서 DB 에 바로 닿는다.
@@ -17,7 +17,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       # api 가 DB 준비 전에 기동해 healthz 가 503 을 내는 것을 막는다.
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vinyl} -d ${POSTGRES_DB:-vinyl_radar}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orot} -d ${POSTGRES_DB:-orot}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -32,7 +32,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://vinyl:vinyl_local_dev_only@postgres:5432/vinyl_radar}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://orot:orot_local_dev_only@postgres:5432/orot}
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
@@ -61,7 +61,7 @@ services:
       - ./migrations:/app/migrations
       - ./alembic.ini:/app/alembic.ini
     command:
-      ["uvicorn", "vinyl_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+      ["uvicorn", "orot_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)\""]
       interval: 10s
@@ -78,7 +78,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://vinyl:vinyl_local_dev_only@postgres:5432/vinyl_radar}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://orot:orot_local_dev_only@postgres:5432/orot}
       ENVIRONMENT: ${ENVIRONMENT:-local}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CRAWLER_USER_AGENT: ${CRAWLER_USER_AGENT:?.env 에 CRAWLER_USER_AGENT 를 설정하십시오 (블루프린트 §3.4)}
@@ -133,3 +133,5 @@ services:
 
 volumes:
   postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-orot_postgres_data}
+    external: ${POSTGRES_VOLUME_EXTERNAL:-false}

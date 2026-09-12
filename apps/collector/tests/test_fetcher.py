@@ -11,7 +11,7 @@ from itertools import pairwise
 import httpx
 import pytest
 
-from vinyl_collector.fetcher import (
+from orot_collector.fetcher import (
     MAX_CONCURRENCY,
     MAX_RATE_LIMIT_RPS,
     Fetcher,
@@ -22,7 +22,7 @@ from vinyl_collector.fetcher import (
     content_hash,
 )
 
-USER_AGENT = "VinylRadar/1.0 (+https://example.com/about; contact@example.com)"
+USER_AGENT = "OROT/1.0 (+https://example.com/about; contact@example.com)"
 ALLOW_ALL_ROBOTS = "User-agent: *\nAllow: /\n"
 
 

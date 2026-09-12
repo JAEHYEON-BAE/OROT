@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from vinyl_api.icalendar import MAX_OCTETS, CalendarBuilder, escape_text, fold
+from orot_api.icalendar import MAX_OCTETS, CalendarBuilder, escape_text, fold
 
 WHEN = datetime(2026, 8, 25, 5, 0, tzinfo=UTC)
 

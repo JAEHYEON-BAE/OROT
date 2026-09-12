@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from vinyl_core.alerts import ALERT_COOLDOWN, Alert, NullAlertSender, ThrottledAlerts
+from orot_core.alerts import ALERT_COOLDOWN, Alert, NullAlertSender, ThrottledAlerts
 
 NOW = datetime(2026, 10, 1, 5, 0, tzinfo=UTC)
 
@@ -123,7 +123,7 @@ def test_message_templates_have_the_placeholders_the_code_fills() -> None:
     `{이름}` 을 지우거나 오타를 내면 **알림이 필요한 바로 그 순간에 `KeyError`** 가 난다.
     여기서 미리 잡는다.
     """
-    from vinyl_collector import scheduler as s
+    from orot_collector import scheduler as s
 
     assert s.TICK_FAILED_DETAIL.format(exception="RuntimeError")
     assert "2" in s.EXHAUSTED_TITLE.format(count=2)
@@ -139,7 +139,7 @@ def test_routine_churn_is_not_alerted() -> None:
     정말 위험한 경우(VAPID 키 불일치)는 푸시 서비스가 403 을 주고, 403 은
     `GONE`(404/410)이 아니라 `FAILED` 라서 `exhausted` 알림이 담당한다.
     """
-    from vinyl_collector import scheduler as s
+    from orot_collector import scheduler as s
 
     assert not hasattr(s, "DEACTIVATED_TITLE")
     source = pathlib.Path(s.__file__).read_text(encoding="utf-8")

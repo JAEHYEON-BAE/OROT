@@ -2,7 +2,7 @@
 
 ## Product and source of truth
 
-Vinyl Radar is a Korean vinyl release-schedule notification service. The current
+OROT is a Korean vinyl release-schedule notification service. The current
 product uses operator-entered schedules, a public feed/calendar, RSS/iCalendar,
 and Web Push. Automated collection remains deliberately unwired until M3; do not
 enable it as incidental cleanup or expand the product into a sales catalog.
@@ -17,13 +17,19 @@ For backlog work, announce the applicable `T-XXX` ID and complete one task's
 acceptance criteria at a time. Document unresolved architectural decisions in a
 draft ADR before requesting a decision; do not invent a task ID for maintenance.
 
+## Naming
+
+Use **OROT** for the service and project directory; use `orot` in tool identifiers
+and `orot_*` in Python imports. Preserve immutable feed IDs and existing DB/backup
+identities. The word vinyl in record materials and source fixtures is not branding.
+
 ## Repository map
 
-- `packages/core/src/vinyl_core/`: shared settings, async database access,
+- `packages/core/src/orot_core/`: shared settings, async database access,
   SQLAlchemy models, adapters, schedule events, and notification selection.
-- `apps/api/src/vinyl_api/`: FastAPI routers, admin UI, schemas, feed queries,
+- `apps/api/src/orot_api/`: FastAPI routers, admin UI, schemas, feed queries,
   RSS, iCalendar, and push subscription endpoints.
-- `apps/collector/src/vinyl_collector/`: CLI, fetcher, scheduler, and push sender.
+- `apps/collector/src/orot_collector/`: CLI, fetcher, scheduler, and push sender.
 - `apps/web/`: Next.js App Router, React, TypeScript, Tailwind CSS, and service
   worker. Follow its nested `AGENTS.md`; read the relevant installed Next.js
   guide under `apps/web/node_modules/next/dist/docs/` before writing web code.

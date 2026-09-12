@@ -1,10 +1,10 @@
 /**
- * Vinyl Radar 서비스워커 — 푸시 수신과 알림 클릭 처리만 한다 (T-117, ADR-0006).
+ * OROT 서비스워커 — 푸시 수신과 알림 클릭 처리만 한다 (T-117, ADR-0006).
  *
  * 오프라인 캐싱은 하지 않는다. 캐시된 목록이 보이면 "예약 시작을 놓치지 않게" 라는
  * 약속과 어긋난다 — 지난 일정이 남아 있는 화면은 없는 것만 못하다.
  *
- * 페이로드 키는 서버의 `vinyl_core.notifications.build_payload` 가 만든다.
+ * 페이로드 키는 서버의 `orot_core.notifications.build_payload` 가 만든다.
  * 여기서 읽는 이름과 서버가 보내는 이름이 어긋나면 알림이 조용히 기본 문구로
  * 바뀌므로, `apps/api/tests/test_edge_cases.py` 의 계약 시험이 양쪽을 맞춰 둔다.
  */
@@ -15,10 +15,10 @@ const BADGE = "/icon-192.png";
 // 페이로드가 없거나 깨졌을 때 보여 줄 내용.
 // **무조건 알림을 띄워야 한다** — 아래 주석 참조.
 const FALLBACK = {
-  title: "Vinyl Radar",
+  title: "OROT",
   body: "새 일정이 있습니다. 눌러서 확인하세요.",
   url: "/",
-  tag: "vinyl-radar",
+  tag: "orot",
 };
 
 self.addEventListener("install", () => {

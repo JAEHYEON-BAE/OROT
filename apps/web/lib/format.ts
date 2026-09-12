@@ -47,7 +47,7 @@ export function releaseLabel(r: { artist_name: string | null; title: string; for
  *
  * 알 수 없는 값이면 **원문을 그대로** 돌려준다. 빈 칸을 보여 주면 화면에서
  * 사라진 것처럼 보여, 새 이벤트 종류가 늘었을 때 아무도 알아채지 못한다.
- * 서버(`vinyl_core.notifications`, `routers/rss.py`)와 같은 말을 쓴다 —
+ * 서버(`orot_core.notifications`, `routers/rss.py`)와 같은 말을 쓴다 —
  * 알림에서 "일정 변동"이라고 본 것이 피드에서 다른 말이면 같은 일로 읽히지 않는다.
  */
 const EVENT_LABELS: Record<string, string> = {

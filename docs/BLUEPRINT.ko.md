@@ -1,4 +1,4 @@
-# Vinyl Radar — 바이닐 발매·예약 일정 서비스 청사진 (한국어판)
+# OROT — 바이닐 발매·예약 일정 서비스 청사진 (한국어판)
 
 > **기준일: 2026-09-11 · 버전 1.1.0**. 현재 구현은 소스·마이그레이션·실행 설정을 기준으로 설명한다.
 > 문서와 구현이 충돌하면 구현을 우선하여 문서를 갱신한다. 미구현 계획은 현재 동작이나 자동 실행 지시가 아니다.
@@ -16,6 +16,21 @@
 8. 기존 데이터·키·백업을 보존한다. 파괴적 조작은 승인 범위에서만 수행하며, 테스트는 격리 스키마와 롤백을 우선한다. 공유 DB의 정리는 해당 실행에서 만든 정확한 ID만 대상으로 한다.
 
 ---
+
+### 서비스 이름과 이전 설치 호환성
+
+서비스 표기와 프로젝트 폴더는 **OROT**이다. 기술 식별자는 도구 규칙에 따라
+`orot`, `orot-core`/`orot-api`/`orot-collector`/`orot-web`,
+Python import는 `orot_core`/`orot_api`/`orot_collector`를 사용한다.
+음반 재질·외부 사이트 원문의 vinyl 표기는 서비스 이름이 아니므로 보존한다.
+기존 RSS GUID·iCalendar UID의 namespace는 `orot_api/feed_identity.py`에 보존하여
+이름 변경으로 구독 항목이 중복되지 않게 한다. 새 표기·다운로드 파일명은 OROT 기준이다.
+기존 설치는 `.env`의 DB 접속 정보와 `POSTGRES_VOLUME_NAME`, `POSTGRES_VOLUME_EXTERNAL=true`,
+`ENV_BACKUP_KEYCHAIN_SERVICE`로 기존 DB·암호화 백업을 이어 쓴다. 이를 새 이름으로
+일괄 치환하면 데이터 접근이 끊기므로 실제 DB 역할·볼륨·키체인 식별자는 보존한다.
+새 설치의 기본값은 `orot`, `orot_postgres_data`, `orot-env-backup`이다.
+폴더 이동 시 로컬 venv 경로·LaunchAgent·Compose 소스 마운트를 함께 갱신한다.
+VAPID 키·공개 URL·PWA start_url/scope는 이름 변경으로 바꾸지 않는다.
 
 ## 1. 문제 정의
 
@@ -117,13 +132,13 @@ PostgreSQL ← collector: 60초 tick → 시각 이벤트 → 배송 계획 → 
 
 ### 3.1 구현된 어댑터 인터페이스
 
-`packages/core/src/vinyl_core/adapters/base.py`가 계약이다. 등록은 `@register`와 모듈 자동 탐색으로
+`packages/core/src/orot_core/adapters/base.py`가 계약이다. 등록은 `@register`와 모듈 자동 탐색으로
 처리하며 registry 수정은 필요 없다. 새 소스에는 어댑터 외에도 fixture·테스트·조사 문서·시드가 필요하다.
 
 ```python
 from collections.abc import AsyncIterator
 from typing import Protocol
-from vinyl_core.adapters.base import RawItem
+from orot_core.adapters.base import RawItem
 
 class PageFetcher(Protocol):
     async def fetch_text(self, url: str) -> str | None: ...
@@ -142,7 +157,7 @@ class SourceAdapter(Protocol):
 `RawItem`의 필수값은 source_id·source_item_id·url·title_raw·stock_status다.
 부가 필드는 None, extra는 새 dict, fetched_at은 현재 UTC가 기본이다. 원화는 음수·소수를 거부하며
 fetched_at은 타임존을 요구한다. 파싱 실패는 빈 목록과 로그로 나타낸다.
-`PageFetcher`는 `vinyl_collector.bridge.FetcherPageAdapter`로 주입하여 core가 collector를 import하지 않게 한다.
+`PageFetcher`는 `orot_collector.bridge.FetcherPageAdapter`로 주입하여 core가 collector를 import하지 않게 한다.
 
 ### 3.2 소스별 조사 결과 및 구현 노트
 
@@ -204,7 +219,7 @@ Fetcher는 본문 해시를 계산하고 ETag/Last-Modified를 메모리에 보�
 |---|---|
 | robots.txt 준수 | `urllib.robotparser` 로 매 크롤 시작 시 파싱. `Disallow` 경로 접근 금지 |
 | 요청 속도 제한 | 소스별 **최대 0.5 req/s**, 동시 연결 2 이하. `asyncio.Semaphore` + 지터(jitter) 적용 |
-| User-Agent 명시 | `VinylRadar/1.0 (+https://<도메인>/about; contact@<도메인>)` — 정체와 연락처를 밝힘 |
+| User-Agent 명시 | `OROT/1.0 (+https://<도메인>/about; contact@<도메인>)` — 정체와 연락처를 밝힘 |
 | 조건부 요청 사용 | ETag / Last-Modified 캐시로 불필요한 트래픽 최소화 |
 | 저작물 재사용 최소화 | **메타데이터(제목·아티스트·가격·재고·발매일)만 저장.** 상세 설명 원문·리뷰 텍스트 저장 금지. 썸네일은 URL만 저장하고 자체 CDN에 복제하지 않음 |
 | 원본 귀속 | 모든 화면에서 소스명 표기 + 원본 상품 페이지로 아웃링크 |
@@ -677,7 +692,7 @@ compose.yaml / compose.prod.yaml / Makefile / .env.example
 .vscode/{settings,extensions}.json
 apps/
   api/
-    src/vinyl_api/
+    src/orot_api/
       main.py / deps.py
       routers/{admin,admin_ui,releases,feed,rss,calendar,push}.py
       schemas/{release,push}.py
@@ -686,7 +701,7 @@ apps/
     tests/                         # integration_runtime.py + test_*.py
     pyproject.toml / Dockerfile
   collector/
-    src/vinyl_collector/
+    src/orot_collector/
       cli.py / scheduler.py / push_sender.py / slack_alerter.py / fetcher.py / bridge.py
     tests/fixtures/<source_id>/*.html
     pyproject.toml / Dockerfile
@@ -701,14 +716,14 @@ apps/
     tests/*.test.mjs
     package.json / package-lock.json / next.config.ts / Dockerfile
 packages/core/
-  src/vinyl_core/
+  src/orot_core/
     models/{base,artist,release,listing,source,user}.py
     adapters/{base,registry,gimbab,secondtrack,poclanos}.py
     db.py / settings.py / seed.py / enums.py / logging.py / testing.py
     schedule_events.py / notifications.py / alerts.py
   tests/ / pyproject.toml
 migrations/versions/ / alembic.ini
-infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
+infra/{env-backup,env-restore,orot-start,orot-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
 .github/workflows/ci.yml            # T-012 Python + web verification
@@ -716,7 +731,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**계획 경로**: `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector의 `pipeline.py`,
+**계획 경로**: `apps/ios/`, `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
 core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
 `infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.devcontainer/`는 현재 없다.
 이 경로들은 향후 작업을 위한 예약이며, 이 표만으로 구현·활성화하지 않는다.
@@ -782,8 +797,8 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 ### 8.2 네이티브 앱 구조
 
 ```
-VinylRadar/
-├─ VinylRadarApp.swift              @main, DI 컨테이너
+OROT/
+├─ OROTApp.swift              @main, DI 컨테이너
 ├─ Core/
 │  ├─ APIClient.swift               URLSession + async/await
 │  ├─ Generated/                    swift-openapi-generator 산출물
@@ -821,7 +836,7 @@ NotificationDispatcher (FastAPI 백그라운드 태스크)
    ↓
 aioapns → APNs (token-based auth, .p8 키)
    ↓
-iOS: NotificationHandler → 딥링크 vinylradar://release/1042
+iOS: NotificationHandler → 딥링크 orot://release/1042
 ```
 
 **필요 사항**: Apple Developer Program 연 $99 USD, APNs Auth Key(.p8), Bundle ID, Push Notifications Capability.
@@ -918,7 +933,7 @@ T-012 CI는 아래 로컬 검증과 별도 DB 검증을 자동 실행한다(§9.
 - `make backup`: pg_dump → gzip을 `backups/`에 저장한다. 파이프 실패를 감지하고 실패 파일을 제거한다.
 - `make restore FILE=...`: 사용자 확인 후 압축 해제에 성공한 SQL만 psql 단일 트랜잭션으로 적용한다.
   SQL 오류 시 중단한다. 기존 데이터를 덮어쓰므로 승인과 사전 백업이 필요하다. 시험 복구는 별도 DB에서 한다.
-- `make backup-prune`: 최근 DB 백업 30개를 남긴다. `infra/vinyl-radar-backup.sh`는 DB 실행 시
+- `make backup-prune`: 최근 DB 백업 30개를 남긴다. `infra/orot-backup.sh`는 DB 실행 시
   backup → prune → .env 백업을 실행한다. DB가 꺼져 있으면 건너뛰며 .env 백업 실패는 경고 로그로 남긴다.
 - `.env` 암호화는 `infra/env-backup.sh`, 복구는 `infra/env-restore.sh`다. `ENV_BACKUP_DIR` 기본값은
   **프로젝트 내부** backups/env이며 디스크 밖 저장은 별도 설정해야 한다. keep 기본 10개, 키체인 암호 설정은 `make backup-env-setup`이다.
@@ -936,7 +951,7 @@ T-012 CI는 아래 로컬 검증과 별도 DB 검증을 자동 실행한다(§9.
 실제 주소·터널 등록 상태는 `tailscale funnel status`로 확인한다. 코드와 DB는 Mac mini에 있다.
 웹만 공개하고 API/관리자/DB 포트는 loopback에 둔다. 웹에 범용 API 프록시를 추가하지 않는다.
 
-재부팅 후 `colima start`와 `make prod`로 기동할 수 있다. `infra/vinyl-radar-start.sh`도
+재부팅 후 `colima start`와 `make prod`로 기동할 수 있다. `infra/orot-start.sh`도
 colima 확인 → Compose up → API health 확인을 수행하지만 이미지를 빌드하지 않는다.
 Docker의 restart 정책은 Docker 엔진이 떠 있을 때만 유효하며, 호스트 로그인·데몬 자동 기동을 보장하지 않는다.
 

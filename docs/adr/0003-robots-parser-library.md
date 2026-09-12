@@ -5,7 +5,7 @@
   보완책(URL 패턴 화이트리스트)은 **보류**하며 차후에 도입한다
 - **작성일**: 2026-08-20
 - **관련**: 블루프린트 §3.4, CLAUDE.md §2 규칙 3 / T-005
-- **영향 범위**: `apps/collector/src/vinyl_collector/fetcher.py` 의 `RobotsPolicy`
+- **영향 범위**: `apps/collector/src/orot_collector/fetcher.py` 의 `RobotsPolicy`
 
 ---
 

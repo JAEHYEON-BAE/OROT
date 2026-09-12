@@ -23,4 +23,4 @@ RUN pip install --no-cache-dir -e "/app/apps/api[dev]"
 EXPOSE 8000
 
 # --reload 는 compose 의 command 에서 로컬 개발 시에만 덧붙인다.
-CMD ["uvicorn", "vinyl_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "orot_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

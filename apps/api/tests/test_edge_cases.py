@@ -1,6 +1,6 @@
 """엣지 케이스를 모든 출력 경로에 통과시킨다.
 
-카탈로그는 `vinyl_core.testing` 한 곳에 있다 — 경로마다 케이스를 따로 만들면
+카탈로그는 `orot_core.testing` 한 곳에 있다 — 경로마다 케이스를 따로 만들면
 한쪽만 고쳐지고 다른 쪽이 조용히 깨진다.
 
 검사하는 경로:
@@ -20,14 +20,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+from orot_core.enums import EventType
+from orot_core.notifications import build_payload
+from orot_core.testing import ACCEPTED, REJECTED, EdgeCase
 from pydantic import ValidationError
-from vinyl_core.enums import EventType
-from vinyl_core.notifications import build_payload
-from vinyl_core.testing import ACCEPTED, REJECTED, EdgeCase
 
-from vinyl_api.icalendar import MAX_OCTETS, CalendarBuilder
-from vinyl_api.rss import RssBuilder
-from vinyl_api.schemas.release import ReleaseIn
+from orot_api.icalendar import MAX_OCTETS, CalendarBuilder
+from orot_api.rss import RssBuilder
+from orot_api.schemas.release import ReleaseIn
 
 NOW = datetime(2026, 10, 1, 5, 0, tzinfo=UTC)
 

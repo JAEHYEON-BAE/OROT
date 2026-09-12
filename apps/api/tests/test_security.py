@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from orot_core.notifications import is_allowed_push_endpoint
+from orot_core.settings import Settings
 from pydantic import ValidationError
-from vinyl_core.notifications import is_allowed_push_endpoint
-from vinyl_core.settings import Settings
 
-from vinyl_api.deps import require_admin
-from vinyl_api.schemas.push import PushKeys
+from orot_api.deps import require_admin
+from orot_api.schemas.push import PushKeys
 
 
 @pytest.mark.parametrize("key", ["", " ", "\t"])
@@ -26,7 +26,7 @@ def test_public_mode_rejects_short_admin_key(environment):
 
 @pytest.mark.asyncio
 async def test_admin_dependency_fails_closed_even_with_invalid_settings(monkeypatch):
-    monkeypatch.setattr("vinyl_api.deps.get_settings", lambda: SimpleNamespace(admin_api_key=""))
+    monkeypatch.setattr("orot_api.deps.get_settings", lambda: SimpleNamespace(admin_api_key=""))
     with pytest.raises(HTTPException) as error:
         await require_admin(None)
     assert error.value.status_code == 401
@@ -88,7 +88,7 @@ def test_unusable_push_keys_cannot_fill_delivery_queue(public_key, auth):
     ],
 )
 async def test_api_body_limit_precedes_parser(length, chunks, expected):
-    from vinyl_api.request_limits import PushBodyLimitMiddleware
+    from orot_api.request_limits import PushBodyLimitMiddleware
 
     sent = []
     remaining = list(chunks)

@@ -9,7 +9,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from vinyl_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseLinkOut
+from orot_api.schemas.release import ReleaseIn, ReleaseLinkIn, ReleaseLinkOut
 
 
 def test_release_accepts_multiple_links() -> None:
@@ -68,7 +68,7 @@ def test_shop_name_is_required() -> None:
 
 def test_release_update_allows_partial_edit() -> None:
     """폼의 '수정 저장'은 보낸 필드만 바꾼다."""
-    from vinyl_api.schemas.release import ReleaseUpdate
+    from orot_api.schemas.release import ReleaseUpdate
 
     payload = ReleaseUpdate(title="새 제목")
     changed = payload.model_dump(exclude_unset=True)
@@ -79,7 +79,7 @@ def test_update_rejects_naive_datetime() -> None:
     """수정 경로에도 생성과 같은 타임존 규칙이 걸려야 한다."""
     from datetime import datetime
 
-    from vinyl_api.schemas.release import ReleaseUpdate
+    from orot_api.schemas.release import ReleaseUpdate
 
     with pytest.raises(ValidationError, match="타임존"):
         ReleaseUpdate(preorder_opens_at=datetime(2026, 9, 10, 0, 0))

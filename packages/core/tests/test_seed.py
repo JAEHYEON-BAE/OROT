@@ -7,8 +7,8 @@ DB 연결이 필요 없다 — `sources.yaml` 의 내용과 로더의 계약만 
 import pytest
 from pydantic import ValidationError
 
-from vinyl_core.enums import SourceKind
-from vinyl_core.seed import MIN_CRAWL_INTERVAL_SEC, SourceSeed, load_source_seeds
+from orot_core.enums import SourceKind
+from orot_core.seed import MIN_CRAWL_INTERVAL_SEC, SourceSeed, load_source_seeds
 
 # 블루프린트 §3.2 가 M0~M1 대상으로 지정한 소스.
 EXPECTED_SOURCE_IDS = {"gimbab", "secondtrack", "poclanos"}

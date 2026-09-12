@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Response
+from orot_core.models import Release
 from starlette.requests import Request
-from vinyl_core.models import Release
 
-from vinyl_api.routers.feed import get_feed, release_feed_query
+from orot_api.routers.feed import get_feed, release_feed_query
 
 
 @pytest.mark.asyncio

@@ -10,14 +10,14 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from vinyl_core.adapters import registry as registry_module
-from vinyl_core.adapters.base import (
+from orot_core.adapters import registry as registry_module
+from orot_core.adapters.base import (
     MIN_CRAWL_INTERVAL_SECONDS,
     RawItem,
     SourceAdapter,
     StockStatus,
 )
-from vinyl_core.adapters.registry import (
+from orot_core.adapters.registry import (
     AdapterRegistrationError,
     available_source_ids,
     get_adapter,
@@ -181,7 +181,7 @@ def test_every_registered_adapter_has_a_seeded_source() -> None:
     어댑터가 아직 없는 지금은 공집합이라 자동 통과하지만,
     T-007 이후 어댑터를 추가하면서 시드를 빠뜨리면 여기서 잡힌다.
     """
-    from vinyl_core.seed import load_source_seeds
+    from orot_core.seed import load_source_seeds
 
     seeded = {s.id for s in load_source_seeds()}
     registered = set(available_source_ids())

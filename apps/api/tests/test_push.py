@@ -9,10 +9,10 @@ import base64
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from orot_core.settings import Settings
 from pydantic import ValidationError
-from vinyl_core.settings import Settings
 
-from vinyl_api.schemas.push import PushSubscriptionIn, PushUnsubscribeIn
+from orot_api.schemas.push import PushSubscriptionIn, PushUnsubscribeIn
 
 PUBLIC_KEY = (
     base64.urlsafe_b64encode(

@@ -1,7 +1,7 @@
 - generic [active] [ref=f1e1]:
   - banner [ref=f1e2]:
     - navigation [ref=f1e3]:
-      - link "Vinyl Radar" [ref=f1e4] [cursor=pointer]:
+      - link "OROT" [ref=f1e4] [cursor=pointer]:
         - /url: /
       - link "피드" [ref=f1e5] [cursor=pointer]:
         - /url: /
@@ -45,7 +45,7 @@
             - generic [ref=f1e38]: 한정반
             - time [ref=f1e39]: 9월 10일 (목) PM 01:37
           - heading [level=2] [ref=f1e40]:
-            - link "Vinyl Radar 테스트 — [테스트] 알림 목록 확인용 (LP)" [ref=f1e41] [cursor=pointer]:
+            - link "OROT 테스트 — [테스트] 알림 목록 확인용 (LP)" [ref=f1e41] [cursor=pointer]:
               - /url: /releases/32
           - paragraph [ref=f1e42]: 클리어
           - link "김밥레코즈 · 55,000원" [ref=f1e44] [cursor=pointer]:
@@ -56,7 +56,7 @@
             - generic [ref=f1e48]: 한정반
             - time [ref=f1e49]: 9월 8일 (화) PM 05:48
           - heading [level=2] [ref=f1e50]:
-            - link "Vinyl Radar 테스트 — [테스트] 알림 확인용 발매 (LP)" [ref=f1e51] [cursor=pointer]:
+            - link "OROT 테스트 — [테스트] 알림 확인용 발매 (LP)" [ref=f1e51] [cursor=pointer]:
               - /url: /releases/31
           - paragraph [ref=f1e52]: 투명 레드
           - generic [ref=f1e53]:
