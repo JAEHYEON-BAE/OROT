@@ -44,7 +44,7 @@ def test_redirect_is_not_reported_as_success(monkeypatch):
         "orot_collector.push_sender.webpush",
         lambda **kwargs: SimpleNamespace(status_code=307),
     )
-    from pywebpush import WebPushException
+    from orot_collector.push_sender import WebPushException
 
     with pytest.raises(WebPushException):
         _send_push()
@@ -87,7 +87,7 @@ async def test_exception_details_do_not_leak_subscription_secrets(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [404, 410, 429, 500, 503])
 async def test_push_service_status_classification(monkeypatch, status):
-    from pywebpush import WebPushException
+    from orot_collector.push_sender import WebPushException
 
     monkeypatch.setattr(
         "orot_collector.push_sender.get_settings",

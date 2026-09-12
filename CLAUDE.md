@@ -116,7 +116,7 @@ do not start/rebuild services or send notifications just to validate prose.
 
 ### Naming
 - Service/project name: **OROT**. Tool identifiers: `orot`; Python packages: `orot_*`.
-- Preserve existing feed UID/GUID namespaces and physical DB/backup identities during renames.
+- Feed UID/GUID namespace is `OROT` (owner-approved prelaunch change, 2026-09-12). Keep it stable going forward; preserve physical DB/backup identities.
 - `source_id` values are lowercase ASCII slugs: `gimbab`, `secondtrack`, `poclanos`.
 - Database and JSON fields are `snake_case`. The current web client manually types the API subset it uses in `apps/web/lib/api.ts`. Keep those types aligned with API schemas; no Swift client exists yet.
 - Fields suffixed `_raw` hold source text verbatim. **Never normalize in place;** normalized values live in `_norm` fields.

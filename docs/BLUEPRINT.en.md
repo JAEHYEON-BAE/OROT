@@ -23,8 +23,10 @@ The service display name and project directory are **OROT**. Tool identifiers us
 `orot`, `orot-core`/`orot-api`/`orot-collector`/`orot-web`, and Python imports use
 `orot_core`/`orot_api`/`orot_collector`. The word vinyl in record materials or original
 source-site content is not a service name and remains intact.
-Existing RSS GUID and iCalendar UID namespaces remain in `orot_api/feed_identity.py`
-to avoid duplicating subscribed items. Display names and download filenames use OROT.
+Before public distribution, the owner chose on 2026-09-12 to unify RSS GUID and iCalendar
+UID namespaces as `OROT` in `orot_api/feed_identity.py`: `event-10@OROT`,
+`preorder-1@OROT`, `release-1@OROT`. Keep these IDs stable from now on.
+Existing test subscribers may see these as new items. Display names and filenames also use OROT.
 Existing installations retain DB connection settings and use `POSTGRES_VOLUME_NAME`,
 `POSTGRES_VOLUME_EXTERNAL=true` and `ENV_BACKUP_KEYCHAIN_SERVICE` in `.env` to preserve
 DB and encrypted-backup access. Do not blindly rename physical DB roles, volumes or

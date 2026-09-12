@@ -125,7 +125,7 @@ def test_icalendar_survives_edge_cases(case: EdgeCase) -> None:
 
     if release.preorder_opens_at:
         calendar.add_timed_event(
-            uid=f"preorder-{release.id}@vinyl-radar",
+            uid=f"preorder-{release.id}@OROT",
             start=release.preorder_opens_at,
             summary=f"예약 시작 · {label}",
             description="\n".join(f"{x.shop_name}: {x.url}" for x in release.links),
@@ -135,7 +135,7 @@ def test_icalendar_survives_edge_cases(case: EdgeCase) -> None:
         )
     if release.release_date:
         calendar.add_all_day_event(
-            uid=f"release-{release.id}@vinyl-radar",
+            uid=f"release-{release.id}@OROT",
             day=release.release_date,
             summary=f"발매 · {label}",
             stamp=NOW,
@@ -238,7 +238,7 @@ def test_rss_stays_well_formed(case: EdgeCase) -> None:
     feed.add_item(
         title=f"[새 일정] {label}",
         link=release.links[0].url if release.links else "https://e.com/r/1",
-        guid="event-1@vinyl-radar",
+        guid="event-1@OROT",
         published_at=NOW,
         description=" · ".join(f"{x.shop_name}: {x.url}" for x in release.links) or "정보 없음",
         categories=["새 일정"],

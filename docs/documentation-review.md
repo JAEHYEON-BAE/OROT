@@ -97,3 +97,55 @@ OROT 임시 DB 마이그레이션·통합 시나리오 9개·롤백, actionlint�
 Compose 프로젝트와 컨테이너는 orot으로 전환했으며 기존 DB 볼륨·등록 일정/구독 수가 보존되었다.
 호스트 자동 시작·백업 LaunchAgent도 com.orot 이름과 새 경로로 갱신했다.
 기존 DB의 테스트 발매 제목 2건에는 과거 서비스명이 있으나 등록 데이터이므로 수정하지 않았다.
+
+
+## 이름·의존성 재점검 및 caching 타입 오류 수정 — 2026-09-12
+
+추적 소스·설정·문서와 설치된 Python 패키지/실행 스크립트의 경로를 다시 확인했다.
+이전 서비스명은 구독 ID 호환성 상수·그 테스트와 설명, 비공개 기존 DB/백업 연결 설정에만 남는다.
+음반 재질·외부 원문과 과거 백업 데이터는 이름 변경 대상이 아니다.
+
+`caching.py`의 `list[type(payload[0])]`는 실행 시 계산한 타입을 타입 인수에 사용하여
+mypy의 `Type expected within [...]` 오류를 일으켰다. 각 모델의 `model_dump_json()`으로
+JSON 배열을 구성하도록 수정했다. 빈 목록, 기존 JSON/ETag 유지, 제외 필드,
+서로 다른 모델의 필드 및 사용자 지정 직렬화에 대한 회귀 테스트 3개를 추가했다.
+기존 core 전용 mypy와 별도로 해당 API 파일도 검사해 통과했다.
+
+- 로컬 venv와 운영 API/collector의 `pip check` 모두 통과. 이전 이름의 Python 배포 패키지 없음.
+- `make lint`, Python **415 passed / 2 xfailed**, 웹 lint·**19 tests**, 호스트·Linux 빌드 통과.
+  초기 호스트 검증의 캐시/.next 쓰기 제한은 실행 권한을 조정해 재검증했다.
+- `npm ci` 성공. 누락/버전 충돌은 없으나 선택적 sharp/WASM 관련 패키지 6개가 `extraneous`로
+  표시된다. 깨끗한 재설치 후에도 재현되어 폴더 이동 잔여물로 보지 않는다.
+  의존성 버전과 잠금 파일은 변경하지 않았다.
+- Starlette의 httpx 사용 중단 예정 경고와 ESLint 9 지원 종료 설치 경고는 남아 있다.
+  이번 작업은 이름/호환성 점검이며 의존성 메이저 업그레이드는 수행하지 않았다.
+- 호스트 Node는 25, CI·Docker는 22이므로 개발 환경도 Node 22 사용을 권장한다.
+  com.orot.stack/com.orot.backup의 새 경로 등록을 확인했고, 운영 컨테이너들은 실행 중이다.
+
+
+## 타입 정보·피드 ID 갱신 및 실제 Push 검증 — 2026-09-12
+
+대중 배포 전 사용자의 명시적 결정에 따라 위 점검에서 보존했던 RSS GUID/iCalendar UID의
+namespace도 `OROT`으로 변경했다. 이후 생성되는 ID는 `event-52@OROT`,
+`release-35@OROT`과 같은 namespace를 사용한다. DB 마이그레이션은 필요하지 않으며,
+기존 구독 클라이언트에서는 ID 변경으로 항목을 새 항목으로 인식할 수 있다.
+앞선 절의 이전 namespace 보존 설명은 당시 점검 기록이며 현재 동작은 이 절을 따른다.
+
+API와 collector에 `py.typed` 및 setuptools package-data 설정을 추가했다. core는 이미
+marker가 있었다. 정상 wheel을 빌드하여 두 marker가 배포 파일에도 포함됨을 확인했다.
+테스트의 `import-untyped` 진단을 재현한 뒤 해소했으며, 확장 검사에서 발견한 SQLAlchemy
+타입 좁히기, Pydantic 입력 타입, 캐시 테스트 입력 타입 등도 정정했다.
+
+- `make lint` 통과, Python **418 passed / 2 xfailed**. 기존 Starlette/httpx 경고는 남는다.
+- API·collector·core 테스트 파일 **25개**의 mypy 검사 통과
+  (`--follow-imports=silent`, 전체 애플리케이션의 strict 타입 검사를 의미하지 않음).
+- 소스·문서·설정 재검색에서 이전 서비스명 잔여 없음. 비공개 기존 DB/볼륨/백업 연결 설정,
+  과거 저장 데이터, 의존성·빌드 캐시 및 음반 재질/외부 원문은 구분하여 보존했다.
+- 실행 중 서비스의 RSS GUID 3개와 ICS UID 4개 모두 `@OROT`임을 HTTP 응답으로 확인했다.
+- 사용자 승인으로 새 더미 일정 **#35** (`OROT 더미 전송 테스트 — 20260912T055455Z`)을
+  실제 관리 API로 생성·공개했다. 이벤트 **#52**, 활성 구독 **224·225** 모두 정상 스케줄러를
+  통해 **SENT**, 각 **1회 시도**로 기록됐다(2026-09-12 05:55:30 UTC).
+  이는 Push 서비스 전송 성공이며 기기 화면의 알림 표시는 별도 확인 대상이다.
+- 후속 날짜 알림을 방지하도록 더미에는 발매/예약 날짜를 지정하지 않았다. 알림 링크 확인을 위해
+  일정은 유지했다. 생성 기록은 로컬 `backups/orot-live-dummy-20260912.jsonl`에 남겼다.
+  Slack 테스트 발송은 수행하지 않았다.

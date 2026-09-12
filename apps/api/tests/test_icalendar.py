@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from orot_api.icalendar import MAX_OCTETS, CalendarBuilder, escape_text, fold
+from orot_api.routers.calendar import _uid
 
 WHEN = datetime(2026, 8, 25, 5, 0, tzinfo=UTC)
 
@@ -16,7 +17,7 @@ WHEN = datetime(2026, 8, 25, 5, 0, tzinfo=UTC)
 def _build() -> str:
     calendar = CalendarBuilder("테스트 달력")
     calendar.add_timed_event(
-        uid="preorder-1@vinyl-radar",
+        uid="preorder-1@OROT",
         start=WHEN,
         summary="예약 시작 · 실리카겔 — Machine Boy",
         stamp=WHEN,
@@ -25,7 +26,7 @@ def _build() -> str:
         alarm_minutes_before=30,
     )
     calendar.add_all_day_event(
-        uid="release-1@vinyl-radar", day=date(2026, 9, 12), summary="발매 · Machine Boy", stamp=WHEN
+        uid="release-1@OROT", day=date(2026, 9, 12), summary="발매 · Machine Boy", stamp=WHEN
     )
     return calendar.render()
 
@@ -93,5 +94,12 @@ def test_alarm_fires_before_the_event() -> None:
 
 def test_uid_is_stable_for_the_same_release() -> None:
     """UID 가 바뀌면 캘린더 앱이 같은 일정을 새 일정으로 또 만든다 (§3.8.4.7)."""
-    assert _build().count("UID:preorder-1@vinyl-radar") == 1
+    assert _build().count("UID:preorder-1@OROT") == 1
     assert _build() == _build()
+
+
+@pytest.mark.parametrize("kind", ["preorder", "release"])
+def test_endpoint_uid_uses_orot_and_is_stable(kind: str) -> None:
+    assert _uid(1, kind) == f"{kind}-1@OROT"
+    assert _uid(1, kind) == _uid(1, kind)
+    assert _uid(1, kind) != _uid(2, kind)

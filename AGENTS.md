@@ -20,8 +20,8 @@ draft ADR before requesting a decision; do not invent a task ID for maintenance.
 ## Naming
 
 Use **OROT** for the service and project directory; use `orot` in tool identifiers
-and `orot_*` in Python imports. Preserve immutable feed IDs and existing DB/backup
-identities. The word vinyl in record materials and source fixtures is not branding.
+and `orot_*` in Python imports. Feed IDs use the `OROT` namespace after the
+owner-approved prelaunch change. Keep them stable and preserve existing DB/backup identities. The word vinyl in record materials and source fixtures is not branding.
 
 ## Repository map
 

@@ -1,6 +1,7 @@
 """Public-test security regressions; no DB writes or network requests."""
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -133,7 +134,8 @@ def test_secrets_never_appear_in_settings_repr(field: str) -> None:
     로그를 수집하는 환경으로 옮기면 그대로 사고가 된다.
     """
     marker = f"__{field}_should_not_be_printed__"
-    settings = Settings(_env_file=None, **{field: marker, "environment": "local"})  # type: ignore[arg-type]
+    options: dict[str, Any] = {"_env_file": None, field: marker, "environment": "local"}
+    settings = Settings(**options)
 
     assert getattr(settings, field) == marker, "값 자체는 읽을 수 있어야 한다"
     assert marker not in repr(settings)
@@ -142,7 +144,8 @@ def test_secrets_never_appear_in_settings_repr(field: str) -> None:
 
 def test_non_secret_settings_stay_visible() -> None:
     """전부 가리면 로그로 디버깅할 수 없다. 비밀만 빼야 한다."""
-    rendered = repr(Settings(_env_file=None, environment="local"))
+    options: dict[str, Any] = {"_env_file": None, "environment": "local"}
+    rendered = repr(Settings(**options))
     assert "environment=" in rendered
     assert "public_web_url=" in rendered
     assert "vapid_subject=" in rendered

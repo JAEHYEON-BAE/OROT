@@ -3,6 +3,8 @@
 DB 연결 없이 `Base.metadata` 만 검사한다.
 """
 
+from sqlalchemy import DateTime, Numeric, UniqueConstraint
+
 from orot_core.enums import Curation, EventType
 from orot_core.models import Base, ListingEvent, MergeCandidate, Release, ReleaseLink
 
@@ -10,6 +12,8 @@ from orot_core.models import Base, ListingEvent, MergeCandidate, Release, Releas
 def test_release_has_schedule_fields() -> None:
     """예약창과 공개 여부가 있어야 일정 알림이 가능하다."""
     columns = Release.__table__.c
+    assert isinstance(columns.preorder_opens_at.type, DateTime)
+    assert isinstance(columns.preorder_closes_at.type, DateTime)
     assert columns.preorder_opens_at.type.timezone is True
     assert columns.preorder_closes_at.type.timezone is True
     assert columns.is_published.nullable is False
@@ -23,6 +27,7 @@ def test_release_links_table_exists() -> None:
     # 소스 미등록 판매처도 넣을 수 있어야 한다.
     assert columns.source_id.nullable is True
     assert columns.shop_name.nullable is False
+    assert isinstance(columns.price_krw.type, Numeric)
     assert columns.price_krw.type.scale == 0
 
 
@@ -45,7 +50,7 @@ def test_manual_events_need_no_listing() -> None:
 
 def test_event_anchor_constraint_exists() -> None:
     """listing_id 와 release_id 가 둘 다 NULL 이면 어디 붙은 이벤트인지 알 수 없다."""
-    names = {c.name for c in ListingEvent.__table__.constraints if c.name}
+    names = {c.name for c in Base.metadata.tables["listing_events"].constraints if c.name}
     assert "ck_listing_events_anchor_required" in names
 
 
@@ -81,12 +86,11 @@ def test_web_push_keys_are_stored() -> None:
 
 def test_subscription_is_unique_per_platform_and_token() -> None:
     """같은 엔드포인트로 두 번 구독하면 알림이 두 번 간다."""
-    from orot_core.models import DeviceToken
 
     uniques = {
         tuple(sorted(c.name for c in constraint.columns))
-        for constraint in DeviceToken.__table__.constraints
-        if constraint.__class__.__name__ == "UniqueConstraint"
+        for constraint in Base.metadata.tables["device_tokens"].constraints
+        if isinstance(constraint, UniqueConstraint)
     }
     assert ("platform", "token") in uniques
 
@@ -96,12 +100,11 @@ def test_delivery_is_unique_per_event_and_device() -> None:
 
     이 제약 하나가 스케줄러 재기동·중복 실행에도 재발송을 막는다.
     """
-    from orot_core.models import NotificationDelivery
 
     uniques = {
         tuple(sorted(c.name for c in constraint.columns))
-        for constraint in NotificationDelivery.__table__.constraints
-        if constraint.__class__.__name__ == "UniqueConstraint"
+        for constraint in Base.metadata.tables["notification_deliveries"].constraints
+        if isinstance(constraint, UniqueConstraint)
     }
     assert ("device_token_id", "event_id") in uniques
 

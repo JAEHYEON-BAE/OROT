@@ -7,9 +7,14 @@
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from orot_core.models import ListingEvent, Release
+from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
+from orot_api.routers.rss import feed_rss
 from orot_api.rss import RssBuilder, escape, rfc822
 
 WHEN = datetime(2026, 8, 27, 7, 33, 2, tzinfo=UTC)
@@ -26,7 +31,7 @@ def _build() -> str:
     feed.add_item(
         title='새소년 — 난춘 <7">',
         link="https://example.com/p?a=1&b=2",
-        guid="event-10@vinyl-radar",
+        guid="event-10@OROT",
         published_at=WHEN,
         description="포맷: 7INCH · 한정반",
         categories=["일정 등록", "한정반"],
@@ -98,3 +103,17 @@ def test_empty_feed_is_still_valid() -> None:
     )
     root = ET.fromstring(feed.render())
     assert root.find("channel") is not None
+
+
+async def test_endpoint_uses_orot_guid() -> None:
+    release = Release(id=1, title="테스트", links=[])
+    event = ListingEvent(id=10, event_type="SCHEDULE_ADDED", occurred_at=WHEN)
+    session = AsyncMock(spec=AsyncSession)
+    rows = Mock()
+    rows.all.return_value = [(event, release)]
+    session.execute.return_value = rows
+    response = await feed_rss(session, Request({"type": "http"}))
+    guid = ET.fromstring(bytes(response.body)).find("channel/item/guid")
+    assert guid is not None
+    assert guid.text == "event-10@OROT"
+    assert guid.get("isPermaLink") == "false"

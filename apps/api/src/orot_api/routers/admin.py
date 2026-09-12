@@ -260,12 +260,12 @@ async def update_release(
             if url not in desired:
                 await session.delete(link)
         for url, data in desired.items():
-            link = existing_links.get(url)
-            if link is None:
+            existing_link = existing_links.get(url)
+            if existing_link is None:
                 session.add(ReleaseLink(release_id=release.id, **data.model_dump()))
             else:
                 for field, value in data.model_dump().items():
-                    setattr(link, field, value)
+                    setattr(existing_link, field, value)
     await session.flush()
     await session.refresh(release, ["links"])
     log.info("admin.release.updated", release_id=release.id)

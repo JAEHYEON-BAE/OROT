@@ -23,8 +23,10 @@
 `orot`, `orot-core`/`orot-api`/`orot-collector`/`orot-web`,
 Python import는 `orot_core`/`orot_api`/`orot_collector`를 사용한다.
 음반 재질·외부 사이트 원문의 vinyl 표기는 서비스 이름이 아니므로 보존한다.
-기존 RSS GUID·iCalendar UID의 namespace는 `orot_api/feed_identity.py`에 보존하여
-이름 변경으로 구독 항목이 중복되지 않게 한다. 새 표기·다운로드 파일명은 OROT 기준이다.
+RSS GUID·iCalendar UID는 대중 배포 전 사용자 결정(2026-09-12)에 따라
+`orot_api/feed_identity.py`의 `OROT` namespace로 통일했다. 예: `event-10@OROT`,
+`preorder-1@OROT`, `release-1@OROT`. 이후에는 고정 ID의 안정성을 유지한다.
+이전 테스트 구독에서는 항목이 새로 인식될 수 있다. 표시명·다운로드 파일명도 OROT 기준이다.
 기존 설치는 `.env`의 DB 접속 정보와 `POSTGRES_VOLUME_NAME`, `POSTGRES_VOLUME_EXTERNAL=true`,
 `ENV_BACKUP_KEYCHAIN_SERVICE`로 기존 DB·암호화 백업을 이어 쓴다. 이를 새 이름으로
 일괄 치환하면 데이터 접근이 끊기므로 실제 DB 역할·볼륨·키체인 식별자는 보존한다.

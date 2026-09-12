@@ -8,7 +8,7 @@ DB 연결이 필요 없다 — `Base.metadata` 만 검사한다.
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import Numeric
+from sqlalchemy import DateTime, Numeric, UniqueConstraint
 
 from orot_core.enums import DevicePlatform, EventType, SourceKind, WatchTargetType
 from orot_core.models import Base, Listing
@@ -66,7 +66,9 @@ def test_timestamps_are_timezone_aware(table: str, column: str) -> None:
     소스는 KST 로 발행하지만 DB 에는 UTC 로 들어간다. naive 컬럼이 하나라도 있으면
     변환 시점이 흐려져 발매일·이벤트 시각이 어긋난다.
     """
-    assert Base.metadata.tables[table].c[column].type.timezone is True
+    column_type = Base.metadata.tables[table].c[column].type
+    assert isinstance(column_type, DateTime)
+    assert column_type.timezone is True
 
 
 def test_listing_release_id_is_nullable() -> None:
@@ -81,8 +83,8 @@ def test_listing_source_item_is_unique_per_source() -> None:
     """같은 소스의 같은 상품이 두 행으로 늘어나면 이벤트가 중복 발생한다."""
     uniques = {
         tuple(sorted(c.name for c in constraint.columns))
-        for constraint in Listing.__table__.constraints
-        if constraint.__class__.__name__ == "UniqueConstraint"
+        for constraint in Base.metadata.tables["listings"].constraints
+        if isinstance(constraint, UniqueConstraint)
     }
     assert ("source_id", "source_item_id") in uniques
 

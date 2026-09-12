@@ -361,13 +361,15 @@ def test_raw_item_has_no_length_limit_on_text_fields() -> None:
     Pydantic 에 `max_length` 가 붙으면 초과분이 오류가 되거나 잘린다.
     DB 쪽은 전부 TEXT 라 제한이 없다.
     """
+    from pydantic import HttpUrl
+
     from orot_core.adapters.base import RawItem
 
     long_title = "가" * 5000
     item = RawItem(
         source_id="gimbab",
         source_item_id="1",
-        url="https://gimbabrecords.com/product/detail.html?product_no=1",
+        url=HttpUrl("https://gimbabrecords.com/product/detail.html?product_no=1"),
         title_raw=long_title,
         stock_status=StockStatus.IN_STOCK,
     )
