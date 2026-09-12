@@ -50,7 +50,7 @@ and tested but unwired, to be connected when manual entry becomes the bottleneck
 
 ### 1.3 Success Metrics (MVP)
 
-> These are product targets, not measured results or guaranteed SLAs. External silent-failure alerts are not implemented.
+> These are product targets, not measured results or guaranteed SLAs. Slack operator alerts are implemented, but external monitoring for host/process outages is absent.
 
 | Metric | Target |
 |---|---|
@@ -110,7 +110,7 @@ are wired only for manual `collector run --dry-run`; scheduled collection and pe
 | Collection components | httpx async, selectolax, urllib.robotparser, three adapters | Scheduled persistence, normalization and resolution |
 | Web | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI app and generated clients |
 | Runtime | Docker Compose, Mac mini/colima with Funnel for public testing | EC2/GHCR/SSH deployment |
-| Monitoring/automation | structlog, /healthz, local tests and backup scripts | Prometheus, Sentry, external failure alerts and GitHub Actions |
+| Monitoring/automation | structlog, /healthz, Slack failure alerts, GitHub Actions CI, local tests and backup scripts | Prometheus, Sentry, external liveness monitoring and automated deployment |
 
 ---
 
@@ -706,13 +706,14 @@ migrations/versions/ / alembic.ini
 infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
+.github/workflows/ci.yml            # T-012 Python + web verification
 backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
 **Reserved future paths:** `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector `pipeline.py`,
 core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
-`infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh`, `.github/workflows/` and `.devcontainer/` do not exist.
+`infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh` and `.devcontainer/` do not exist.
 These are reserved for future tasks; their listing does not authorize creating or activating them.
 
 ---
@@ -873,6 +874,7 @@ with `make prod` or `up -d` using the same overlay; restart alone does not updat
 | API_BASE_URL | Web internal API calls; Compose sets http://api:8000 |
 | PUBLIC_WEB_URL | Public links and subscription addresses in API, collector and web |
 | VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT | API subscription availability and collector push delivery |
+| SLACK_WEBHOOK_URL | Collector operator failure alerts; blank/unset disables them |
 | CRAWLER_* | Manual collector configuration; does not enable scheduled harvesting |
 | ENV_BACKUP_DIR / ENV_BACKUP_KEEP | Host .env backup scripts |
 
@@ -900,10 +902,10 @@ npm run build
 
 Default Python tests use fixtures, mocks, TestClient and SQL query checks; no testcontainers setup starts a DB.
 apps/api/tests/integration_runtime.py is an **explicitly invoked** PostgreSQL check. It uses a fake sender,
-creates an isolated schema and rolls everything back. It is excluded from make test and sends no real pushes.
+creates an isolated schema and rolls everything back. It is excluded from make test, runs as a separate CI step and sends no real pushes.
 `collector test-push` does send real notifications and requires user authorization.
 
-CI, parser canaries and coverage gates are absent. Test counts in docs/runtime-review.md are dated 2026-09-10
+T-012 CI automates local checks and the separate DB check (§9.5). Parser canaries and coverage gates are absent. Test counts in docs/runtime-review.md are dated 2026-09-10
 results, not a substitute for a fresh run. Documentation work must not start services or test deletion on existing records.
 
 ### 9.3-1 Backup and Restore
@@ -937,14 +939,27 @@ while the engine is running; they do not guarantee host login or daemon startup.
 ### 9.4 Observability and Limits
 
 Current signals are structlog logs, DB-aware /healthz, scheduler.tick, notifications.dispatched and
-push.retry_exhausted. There is no universal trace_id, Prometheus, Sentry or external operator-alert channel.
+push.retry_exhausted. Setting `SLACK_WEBHOOK_URL` enables Slack alerts for scheduler tick errors and
+retry exhaustion ([ADR-0008](adr/0008-operator-failure-alerts.md)). Exhaustion is reported after the
+delivery transaction commits; alert failures do not roll back deliveries. By default, each error key
+is successfully sent only once per process, including recurrences after recovery. Restart resets suppression.
+There is no durable queue to retain and retry exhaustion alerts after Slack failure.
+Host/process outage detection, universal trace_id, Prometheus and Sentry are absent.
 Anonymous subscriptions have URL/key validation, body size/time bounds, process-local rate limits, DB capacity
 checks and same-origin validation in web ([security review](security-review.md)). API rate limits are not shared across processes.
 
 ### 9.5 CI/CD Status
 
-.github/workflows/ and infra/deploy.sh do not exist: no automated CI, GHCR publishing, SSH deploy or rollback.
-The current workflow is local Make/npm verification and Compose builds/startup. CI/cloud migration is separate future work.
+`T-012` in `.github/workflows/ci.yml` runs on all PRs, main pushes and manual dispatch.
+The Python 3.12 job runs `make install`, `make lint`, `make test`, applies migrations to disposable
+PostgreSQL 16 with `venv/bin/python -m alembic upgrade head`, then executes
+`venv/bin/python apps/api/tests/integration_runtime.py` for nine isolated scenarios and schema rollback.
+Those scenarios use a separate ORM-created schema, not the migrated schema directly.
+The Node 22 job runs `npm ci`, web lint, Node regression tests and a production build.
+Each job has a 15-minute timeout; newer runs cancel older runs for the same ref. Repository permissions
+are `contents: read`; no production secrets, databases or real notifications are used. Verify GitHub run
+results and required-check settings separately in the repository.
+GHCR publishing, SSH deploy and automatic rollback remain absent; operational startup uses Compose.
 
 ### 9.6 Cost and Operational Scope
 
@@ -958,9 +973,9 @@ neither actual current bills nor verified estimates. Recalculate resources and p
 Each task is written to be **independently verifiable**. Agents must cite the task ID while working.
 
 > Status as of 2026-09-11: M1 paths and M2 time events/Web Push are implemented.
-> T-116 has retries and 404/410 deactivation; **external operator alerts remain open**.
+> T-116 has retries, 404/410 deactivation and **Slack operator alerts implemented in code**. Live configuration and receipt remain separate operational checks.
 > M3+ is planned; acceptance criteria are not completion claims. T-008–T-011 rows preserve the original M0 plan.
-> T-008/T-009 are deferred/unimplemented; public API/web responsibilities were delivered as T-105/T-110. T-012 CI remains absent.
+> T-008/T-009 are deferred/unimplemented; public API/web responsibilities were delivered as T-105/T-110. The T-012 CI workflow is implemented; GitHub run results must be verified separately.
 
 ### M0 — Walking Skeleton (complete)
 
@@ -981,6 +996,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-009 | `pipeline.py`: RawItem → listings upsert (1:1 release creation, no merging yet) | `collector run --source gimbab` populates the DB |
 | T-010 | `GET /v1/releases` with cursor pagination | Exposed in OpenAPI; returns real data |
 | T-011 | Next.js feed screen (SSR, no filters) | List renders at `localhost:3000` |
+| T-012 | GitHub Actions CI (Python, web, PostgreSQL integration) | PR/main push runs both jobs; lint, test, migration or web build failures fail the corresponding job (§9.5) |
 | **M0 closed scope** | Scaffolding, schema and collection components; crawl-to-DB-to-web remains deferred | |
 
 ### M1 — Manual Curation → Public Feed ([ADR-0005](adr/0005-manual-curation-first.md))
@@ -1092,11 +1108,11 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 ## 11. Risks and Mitigations
 
 Distinguish active measures from planned ones: parser canaries, persistent source deactivation, automatic
-recovery and external alerts are not running today. Future mitigations below are not completed safeguards.
+recovery and crawler-specific external alerts are not running today. Future mitigations below are not completed safeguards.
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| Source redesign breaks parsers | High | High | Parser canary (T-018), golden fixture tests, per-source alerting |
+| Source redesign breaks parsers | High | High | Parser canary (T-126), golden fixture tests, per-source alerting |
 | Source operator requests blocking | High | Medium | Advance notice and partnership outreach (§3.4); `sources.is_enabled` allows instant shutoff |
 | Bad merges erode trust | Medium | Medium | Precision-first policy, `merge_candidates` hold queue, reversible merges |
 | Bot protection (Cloudflare etc.) | Medium | Medium | Re-evaluate the source. **Do not attempt circumvention — drop the source instead** |

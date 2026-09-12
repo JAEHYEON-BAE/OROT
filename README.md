@@ -10,7 +10,7 @@ M1 기능과 M2 시각 기반 알림이 구현되어 있으며, 자동 수집은
 - [실행 흐름 점검](docs/runtime-review.md) / [문서 정합성 점검](docs/documentation-review.md)
 
 문서와 현재 소스·마이그레이션·실행 설정이 충돌하면 구현을 기준으로 문서를 갱신합니다.
-계획된 검색·계정·워치리스트·iOS 앱·클라우드 CI/CD는 아직 없습니다.
+계획된 검색·계정·워치리스트·iOS 앱·클라우드 배포는 아직 없습니다. GitHub Actions CI는 T-012로 구현되어 있습니다.
 
 ## 실행
 
@@ -74,8 +74,18 @@ node --test tests/*.test.mjs
 npm run build
 ```
 
-웹 API 타입은 `apps/web/lib/api.ts`의 수기 타입입니다. 생성 클라이언트나 자동 CI는 없습니다.
-별도 DB 검증은 `apps/api/tests/integration_runtime.py`의 격리 스키마·롤백·가짜 발송기 방식으로 수행합니다.
+웹 API 타입은 `apps/web/lib/api.ts`의 수기 타입이며 생성 클라이언트는 없습니다.
+[T-012 CI](.github/workflows/ci.yml)는 모든 PR·main push·수동 실행에서 다음 두 작업을 수행합니다.
+
+- **Python checks**: Python 3.12, `make install`, `make lint`, `make test`, 임시 PostgreSQL 16 마이그레이션과 9개 격리 통합 시나리오
+- **Web checks**: Node 22, `npm ci`, lint·Node 회귀 테스트·production build
+
+CI는 운영 비밀이나 실제 알림 발송을 사용하지 않습니다. GitHub 실행 결과는 Actions/PR에서 확인하며,
+병합 필수 체크 지정은 저장소 설정에서 별도로 관리합니다. 자동 배포는 포함하지 않습니다.
+DB 검증은 마이그레이션된 DB 안에 별도의 ORM 스키마를 만드는
+`apps/api/tests/integration_runtime.py`의 격리·롤백·가짜 발송기 방식입니다.
+임시 개발 DB에 `DATABASE_URL`을 지정한 뒤 `venv/bin/python -m alembic upgrade head`,
+`venv/bin/python apps/api/tests/integration_runtime.py` 순으로 실행할 수 있습니다.
 문서만 수정할 때는 경로·명령·API 계약을 대조하며 서비스 기동이나 실제 알림을 필요로 하지 않습니다.
 
 ## 주요 구조
@@ -96,6 +106,9 @@ npm run build
   삭제하면 해당 음반의 이벤트·배송 이력도 제거됩니다. 일정 수정은 삭제 대신 옛 이벤트를 무효화합니다.
 - 알림은 60초 주기로 생성·발송하며 실패 시 최대 3회 시도합니다. 구독 전 이벤트와 48시간을 지난 이벤트는 보내지 않습니다.
   푸시 서비스 수락과 실제 기기 표시 확인은 다르며, 전송/DB 커밋 사이의 장애에서는 중복 가능성이 남습니다.
+- `SLACK_WEBHOOK_URL`을 설정하면 스케줄러 오류·재시도 소진을 운영자에게 알립니다.
+  같은 오류 종류는 기본적으로 프로세스당 성공 전송 1회이며, 프로세스 자체 중단은 감지하지 못합니다.
+  자세한 동작은 [ADR-0008](docs/adr/0008-operator-failure-alerts.md)을 참고하십시오.
 - 실제 시험 알림은 사용자 승인 범위에서만 보냅니다. 기존 더미 데이터도 임의로 지우지 않습니다.
 - `make backup`은 DB, `make backup-env`는 `.env`를 백업합니다. 기본 저장 위치는 프로젝트 내부이므로
   디스크 밖 보관은 별도 설정해야 합니다. 복구는 기존 내용을 덮어쓰므로 승인과 사전 백업이 필요합니다.
@@ -108,6 +121,6 @@ Fetcher와 gimbab/secondtrack/poclanos 어댑터는 있으나 주기 수집·DB 
 
 수집 시에는 robots 준수, 소스별 0.5 req/s·동시 연결 2 이하, 연락처가 포함된 User-Agent,
 메타데이터와 원본 링크만 사용, 차단 우회 금지를 지킵니다. 설정 검증과 Fetcher가 일부를 강제하지만
-소스 자동 비활성화·운영자 알림·파서 카나리는 아직 없으며 robots 파서 한계는 ADR-0003에 기록되어 있습니다.
+소스 자동 비활성화·수집 장애 운영자 알림·파서 카나리는 아직 없으며 robots 파서 한계는 ADR-0003에 기록되어 있습니다.
 
 전체 명령은 `make help`, 구현과 계획의 구분은 블루프린트 §2·§5·§6·§9·§10을 참고하십시오.

@@ -16,11 +16,16 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-# 같은 종류의 알림을 다시 보내기까지 기다리는 시간.
+# 같은 종류의 알림을 다시 보내기까지 기다리는 시간. `None` 이면 **다시 보내지 않는다.**
 #
 # 스케줄러는 60초마다 돈다. 억제가 없으면 한 번 고장난 것이 **분당 한 통**씩 나가
 # 채널이 묻히고, 그러면 사람이 알림을 꺼 버린다 — 알림이 없는 것과 같아진다.
-ALERT_COOLDOWN: Final = timedelta(minutes=15)
+#
+# 기본값이 `None` 인 이유: Slack 메시지는 지워지지 않고 쌓이므로, 같은 문제를 다시
+# 알려도 새로운 정보가 없다. **감수하는 것** — 문제가 해결됐다가 나중에 다시
+# 생겨도 (프로세스가 살아 있는 한) 알리지 않는다. 그게 신경 쓰이면
+# `timedelta(hours=24)` 처럼 긴 값을 주면 된다.
+ALERT_COOLDOWN: Final[timedelta | None] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,13 +57,15 @@ class NullAlertSender:
 
 
 class ThrottledAlerts:
-    """같은 `key` 의 알림을 쿨다운 동안 한 번만 내보낸다.
+    """같은 `key` 의 알림을 한 번만 내보낸다 (쿨다운이 있으면 그 간격으로).
 
     상태는 프로세스 메모리에 있다. 스케줄러가 재기동하면 억제가 풀려 한 번 더 나가는데,
     **그 편이 낫다** — 재기동 직후는 무언가 잘못됐을 가능성이 높은 시점이다.
+    다만 크래시 루프에서는 재기동마다 나가므로, 그것이 문제가 되면 억제 기록을
+    DB 로 옮겨야 한다 (다중 인스턴스에서도 같은 문제가 생긴다).
     """
 
-    def __init__(self, sender: AlertSender, *, cooldown: timedelta = ALERT_COOLDOWN) -> None:
+    def __init__(self, sender: AlertSender, *, cooldown: timedelta | None = ALERT_COOLDOWN) -> None:
         self._sender = sender
         self._cooldown = cooldown
         self._last: dict[str, datetime] = {}
@@ -66,7 +73,7 @@ class ThrottledAlerts:
     async def send(self, alert: Alert, *, now: datetime | None = None) -> bool:
         moment = now or datetime.now(UTC)
         previous = self._last.get(alert.key)
-        if previous is not None and moment - previous < self._cooldown:
+        if previous is not None and (self._cooldown is None or moment - previous < self._cooldown):
             return False
 
         try:

@@ -30,7 +30,7 @@ count as implemented behavior or authorize incidental implementation.
 2. **No live network requests in tests.** Adapter tests read HTML from `apps/collector/tests/fixtures/<source_id>/`. If a fixture is missing, stop and ask — do not fetch the site to generate one silently.
 3. **Never violate the crawling rules in blueprint §3.4.** Specifically: honor robots.txt, cap at 0.5 req/s per source, identify the crawler in the User-Agent, store metadata only, never rehost images, never bypass CAPTCHAs or bot protection.
 4. **Never write a merge that is not reversible.** Entity resolution only mutates `listings.release_id`. Never delete a `listings` row.
-5. **Never swallow a parse exception.** `parse_page()` returns an empty list on failure and logs the source and URL. The CLI reports parse failures. Prometheus counters and external operator alerts are not implemented; do not describe logs as alert delivery.
+5. **Never swallow a parse exception.** `parse_page()` returns an empty list on failure and logs the source and URL. The CLI reports parse failures. Parser-specific external alerts and Prometheus counters are not implemented. Scheduler errors and push retry exhaustion have Slack alerts (ADR-0008); do not describe parser logs as alert delivery.
 6. **Do not create top-level directories** that are not in blueprint §6.
 7. **Activate `venv/` before running Python.** All Python commands run inside the project virtualenv (`source venv/bin/activate`, 또는 `make` 타깃 사용) or the collector container.
 8. **Ask before deciding anything architectural** that the blueprint leaves open. Write a draft ADR in `docs/adr/NNNN-title.md` and request confirmation.
@@ -191,12 +191,14 @@ that host services are currently running. See [runtime review](docs/runtime-revi
   **Slack 운영자 알림**. 배송은 여전히 크래시 전후로 exactly-once 가 아니다.
 - **Tests:** Python pytest + Ruff + core mypy; web Node tests + ESLint + Next build. Optional
   `apps/api/tests/integration_runtime.py` creates its own PostgreSQL schema and rolls it back,
-  using a fake sender. No testcontainers dependency or GitHub Actions workflows exist.
+  using a fake sender. T-012 `.github/workflows/ci.yml` runs Python checks, disposable PostgreSQL
+  migration/integration checks, and web checks on PR/main push/manual dispatch. No testcontainers
+  dependency exists. GitHub run results and required-check settings are verified separately.
 - **Preserve existing test/demo records and subscriptions.** Do not infer active counts, cleanup
   targets or deletion permission from old IDs in a document. Real `collector test-push` requires
   user authorization; `--dry-run` only reads targets and prints payloads.
 - **Known deferred work:** normalization/aliases/resolution and crawl persistence; search,
-  accounts/watchlists/iOS; parser canary, Prometheus/Sentry and external operator alerts.
+  accounts/watchlists/iOS; parser canary, Prometheus/Sentry and external host/process outage monitoring.
 - **Crawler limitations:** `urllib.robotparser` RFC 9309 gaps remain captured by two expected
   failures (ADR-0003); validators live only in memory; preorder/stock ambiguity is deferred
   (ADR-0001). Review these before wiring M3. Fixture/source findings are dated observations,
@@ -330,14 +332,28 @@ out of enduring rules.
   기본값 localhost 가 쓰여 **발송은 성공하는데 알림 링크만 죽는다** — 발송 로그로는 안 보인다
 - **로그는 아무도 보지 않는다** (T-116). 발송이 조용히 실패하면 사용자는 알림이 안 오는
   줄도 모르고, 운영자는 컨테이너 로그를 뒤져야 안다. 그래서 **밖으로 밀어내는 경로**를 둔다
-- **알림은 억제해야 쓸모가 남는다** (`ALERT_COOLDOWN` 15분). 스케줄러가 60초마다 도는데
-  억제가 없으면 분당 한 통씩 나가 채널이 묻히고, **사람이 알림을 꺼 버린다** —
-  알림이 없는 것과 같아진다. 억제는 `key` 단위라 다른 종류가 서로를 가리지 않는다
+- **같은 알림은 다시 보내지 않는다** (`ALERT_COOLDOWN = None`). 스케줄러가 60초마다
+  도는데 억제가 없으면 분당 한 통씩 나가 채널이 묻히고, **사람이 알림을 꺼 버린다**.
+  Slack 메시지는 쌓여 남으므로 다시 알려도 새 정보가 없다. 억제는 `key` 단위라
+  다른 종류가 서로를 가리지 않는다. 반복이 필요하면 `cooldown=timedelta(...)` 를 준다.
+  **감수 — 문제가 해결됐다 재발해도 (프로세스가 사는 한) 알리지 않는다**
+- **정상적인 이탈은 알리지 않는다.** 구독 해제(404/410)는 사용자가 앱을 지우거나
+  알림을 끈 것이라 운영자가 할 일이 없고 **사용자가 늘수록 늘어나기만 한다**.
+  VAPID 키 불일치 같은 진짜 사고는 푸시 서비스가 **403** 을 주는데, 403 은
+  `GONE`(404/410)이 아니라 `FAILED` 라서 `exhausted` 알림이 이미 담당한다.
+  **알림을 넣을 때는 "이걸 보고 무엇을 할 것인가"를 먼저 답해야 한다**
+- **알림 문구는 `scheduler.py` 상단 상수에 모아 둔다.** 문구를 고치려고 로직을
+  건드리지 않도록. `{이름}` 자리표시자를 지우면 **알림이 필요한 순간에 `KeyError`** 가
+  나므로 `test_alerts.py` 가 미리 잡는다
 - **전송 실패를 '보냈다'로 세지 않는다.** 세면 그 문제가 쿨다운 동안 영영 묻힌다
 - **알림 전송 실패가 스케줄러를 멈추면 안 된다.** 여기서 예외가 새면 알림을 못 보내는 데
   그치지 않고 **발송 자체가 죽는다**
 - **실패(`failed`)는 알리지 않는다** — 다음 주기에 다시 시도하므로 대개 저절로 낫는다.
-  알리는 것은 **재시도 소진**과 **스케줄러 주기 실패**, 그리고 구독 만료 해제뿐이다
+  알리는 것은 **재시도 소진**과 **스케줄러 주기 실패**뿐이다
+- **비밀은 `repr` 에 남기지 않는다** (`Field(repr=False)`). 트레이스백 렌더러가 지역
+  변수를 `repr()` 로 찍어서, `settings` 를 들고 있는 함수가 예외를 던지면 **운영자 키·
+  VAPID 개인키·DB 암호·웹훅 URL 이 통째로 로그에 박힌다.** 실제로 그렇게 나갔다.
+  로그를 수집하는 환경(CloudWatch 등)으로 옮기면 그대로 사고가 된다
 - **웹훅 URL 자체가 비밀이다.** 아는 사람은 누구나 그 채널에 글을 쓸 수 있어
   로그·오류 문자열에 남기지 않는다 (예외는 클래스명만)
 - **알림 제목·본문은 서버에서 한 줄로 정리한다** (`_one_line`). 개행을 넘기면 크롬은

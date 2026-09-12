@@ -49,7 +49,7 @@
 
 ### 1.3 성공 지표 (MVP 기준)
 
-> 아래는 제품 목표이며 현재 측정 결과나 보장된 SLA가 아니다. 외부 무음 실패 알림은 아직 미구현이다.
+> 아래는 제품 목표이며 현재 측정 결과나 보장된 SLA가 아니다. Slack 운영자 알림은 구현되어 있으나, 호스트·프로세스 중단을 감지하는 외부 감시는 없다.
 
 | 지표 | 목표 |
 |---|---|
@@ -109,7 +109,7 @@ PostgreSQL ← collector: 60초 tick → 시각 이벤트 → 배송 계획 → 
 | 수집 부품 | httpx async, selectolax, urllib.robotparser, 3개 어댑터 | 자동 수집 적재·정규화·병합 |
 | 웹 | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI 앱·생성 클라이언트 |
 | 실행 | Docker Compose, Mac mini/colima + Funnel 공개 테스트 | EC2/GHCR/SSH 배포 |
-| 관측·자동화 | structlog, /healthz, 로컬 테스트와 백업 스크립트 | Prometheus·Sentry·외부 실패 알림·GitHub Actions |
+| 관측·자동화 | structlog, /healthz, Slack 장애 알림, GitHub Actions CI, 로컬 테스트와 백업 스크립트 | Prometheus·Sentry·외부 생존 감시·자동 배포 |
 
 ---
 
@@ -711,13 +711,14 @@ migrations/versions/ / alembic.ini
 infra/{env-backup,env-restore,vinyl-radar-start,vinyl-radar-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
+.github/workflows/ci.yml            # T-012 Python + web verification
 backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
 **계획 경로**: `apps/ios/`, `apps/api/src/vinyl_api/services/`, collector의 `pipeline.py`,
 core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
-`infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.github/workflows/`, `.devcontainer/`는 현재 없다.
+`infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.devcontainer/`는 현재 없다.
 이 경로들은 향후 작업을 위한 예약이며, 이 표만으로 구현·활성화하지 않는다.
 
 ---
@@ -878,6 +879,7 @@ production 웹 편집과 의존성 변경은 재빌드한다. `.env`/Compose 환
 | API_BASE_URL | 웹 내부 API 호출 (Compose에서 http://api:8000) |
 | PUBLIC_WEB_URL | api·collector·web의 공개 링크와 구독 주소 |
 | VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT | api 구독 가능 여부, collector Web Push 전송 |
+| SLACK_WEBHOOK_URL | collector 운영자 장애 알림; 공백/미설정이면 비활성화 |
 | CRAWLER_* | collector 수동 수집 설정; 자동 수집을 활성화하지 않음 |
 | ENV_BACKUP_DIR / ENV_BACKUP_KEEP | 호스트의 .env 백업 스크립트 |
 
@@ -905,10 +907,10 @@ npm run build
 
 Python 기본 테스트는 fixture·mock·TestClient·SQL 질의 검증 중심이다. testcontainers 기반 자동 DB 기동은 없다.
 `apps/api/tests/integration_runtime.py`는 **명시적으로 실행하는** PostgreSQL 통합 검증이다.
-가짜 발송기와 독립 스키마를 만들고 전체 롤백하며, 실제 기기로 보내지 않는다. 일반 `make test`에는 포함하지 않는다.
+가짜 발송기와 독립 스키마를 만들고 전체 롤백하며, 실제 기기로 보내지 않는다. 일반 `make test`에는 포함하지 않으며 CI에서는 별도 단계로 실행한다.
 수신 표시 확인이 필요한 `collector test-push`는 실제 발송이며 사용자 승인이 필요하다.
 
-CI·파서 카나리·커버리지 게이트는 미구현이다. `docs/runtime-review.md`의 테스트 수치는 2026-09-10의 기록이며
+T-012 CI는 아래 로컬 검증과 별도 DB 검증을 자동 실행한다(§9.5). 파서 카나리·커버리지 게이트는 미구현이다. `docs/runtime-review.md`의 테스트 수치는 2026-09-10의 기록이며
 매 실행의 최신 결과를 대신하지 않는다. 문서 수정만으로 서비스를 기동하거나 실제 데이터로 삭제 시험을 하지 않는다.
 
 ### 9.3-1 백업과 복구
@@ -941,14 +943,26 @@ Docker의 restart 정책은 Docker 엔진이 떠 있을 때만 유효하며, 호
 ### 9.4 관측성과 알림 한계
 
 structlog 로그, /healthz의 DB 연결 검사, scheduler.tick, notifications.dispatched,
-push.retry_exhausted가 현재 관측 수단이다. 공통 trace_id·Prometheus 메트릭·Sentry·외부 운영자 알림은 없다.
+push.retry_exhausted가 현재 관측 수단이다. `SLACK_WEBHOOK_URL`을 설정하면 스케줄러 주기 오류와
+재시도 소진을 Slack으로 알린다([ADR-0008](adr/0008-operator-failure-alerts.md)). 정상 배송 커밋 뒤에
+소진을 보고하고, 알림 전송 실패는 배송을 롤백시키지 않는다. 같은 오류 종류는 기본적으로 프로세스당
+성공 전송 1회로 억제되어 복구 후 재발도 다시 알리지 않는다. 재시작 시 억제 상태가 초기화된다.
+Slack 실패 후 소진 경보를 보존·재전송하는 큐는 없다.
+프로세스·호스트 중단 감지, 공통 trace_id·Prometheus 메트릭·Sentry는 없다.
 익명 구독에는 URL/키 검증·본문 크기/시간 상한·프로세스 메모리 속도 제한·DB 정원 검사와
 웹 동일 출처 검사가 있다 ([보안 점검](security-review.md)). 속도 제한은 다중 API 프로세스 간 공유되지 않는다.
 
 ### 9.5 CI/CD 상태
 
-`.github/workflows/`와 `infra/deploy.sh`가 없으므로 자동 CI, GHCR push, SSH 배포와 자동 롤백도 없다.
-현재는 로컬 Make/npm 검증과 Compose 빌드·기동을 사용한다. CI/클라우드 이관은 향후 별도 작업이다.
+`T-012`의 `.github/workflows/ci.yml`은 모든 PR, main push, 수동 실행을 지원한다.
+Python 3.12 작업은 `make install`, `make lint`, `make test` 후 임시 PostgreSQL 16에
+`venv/bin/python -m alembic upgrade head`를 적용하고
+`venv/bin/python apps/api/tests/integration_runtime.py`로 9개 격리 시나리오와 스키마 롤백을 검증한다.
+통합 시나리오는 ORM으로 만든 별도 스키마에서 실행하며, 마이그레이션 결과를 직접 사용하는 검증은 아니다.
+Node 22 작업은 `npm ci`, 웹 lint·Node 회귀 테스트·production build를 실행한다.
+작업별 제한은 15분이며 같은 ref의 이전 실행은 취소한다. 저장소 권한은 `contents: read`이고
+운영 비밀·DB·실제 알림 발송을 사용하지 않는다. GitHub 실행 결과와 필수 체크 지정은 저장소에서 별도 확인한다.
+GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose를 사용한다.
 
 ### 9.6 비용과 운영 범위
 
@@ -962,9 +976,9 @@ push.retry_exhausted가 현재 관측 수단이다. 공통 trace_id·Prometheus 
 각 태스크는 **독립적으로 완료 판정 가능**하도록 작성되었습니다. 에이전트는 태스크 ID를 명시하며 진행합니다.
 
 > 상태 기준(2026-09-11): M1 경로와 M2의 시각 이벤트·Web Push가 구현되어 있다.
-> T-116은 재시도/404·410 비활성화까지만 구현되어 **외부 운영자 알림은 남아 있다**.
+> T-116은 재시도/404·410 비활성화와 **Slack 운영자 알림이 코드에 구현되어 있다**. 실제 수신 설정·결과는 별도 운영 검증 사항이다.
 > M3 이후는 계획이며 완료 조건 표가 구현 완료를 뜻하지 않는다. 기존 T-008~T-011 행은 원래 M0 계획의 기록이다.
-> T-008/T-009는 미구현 보류, 공개 API/웹 역할은 T-105/T-110으로 구현했다. T-012 CI는 여전히 미구현이다.
+> T-008/T-009는 미구현 보류, 공개 API/웹 역할은 T-105/T-110으로 구현했다. T-012 CI 워크플로는 구현되어 있으며 GitHub에서의 실행 결과는 별도 확인한다.
 
 ### M0 — Walking Skeleton (완료)
 
@@ -985,6 +999,7 @@ push.retry_exhausted가 현재 관측 수단이다. 공통 trace_id·Prometheus 
 | T-009 | `pipeline.py`: RawItem → listings upsert (병합 없이 release 1:1 생성) | `collector run --source gimbab` 후 DB에 행 적재 |
 | T-010 | `GET /v1/releases` (커서 페이지네이션) | OpenAPI 문서 노출, 실데이터 반환 |
 | T-011 | Next.js 피드 화면 (SSR, 필터 없음) | `localhost:3000` 에서 목록 렌더링 |
+| T-012 | GitHub Actions CI (Python·웹·PostgreSQL 통합 검증) | PR/main push에서 두 작업 실행; lint·테스트·마이그레이션·웹 build 실패 시 해당 작업 실패 (§9.5) |
 | **M0 마감 범위** | 스캐폴딩·스키마·수집 부품까지 완료. 수집 → DB → 웹 연결은 보류 | |
 
 ### M1 — 수동 등록 → 공개 피드 ([ADR-0005](adr/0005-manual-curation-first.md))
@@ -1095,12 +1110,12 @@ push.retry_exhausted가 현재 관측 수단이다. 공통 trace_id·Prometheus 
 
 ## 11. 위험 요소 및 대응
 
-현재 대응과 향후 계획을 구분한다. 파서 카나리·소스 DB 비활성화·자동 복구·외부 경보는 아직 없으며,
+현재 대응과 향후 계획을 구분한다. 파서 카나리·소스 DB 비활성화·자동 복구·수집 장애 외부 경보는 아직 없으며,
 아래 미래 대응을 이미 운영 중인 장치로 해석하지 않는다.
 
 | 위험 | 영향 | 가능성 | 대응 |
 |---|---|---|---|
-| 소스 사이트 개편으로 파서 파손 | 상 | 상 | 파서 카나리(T-018) + fixture 골든 테스트 + 소스별 알람 |
+| 소스 사이트 개편으로 파서 파손 | 상 | 상 | 파서 카나리(T-126) + fixture 골든 테스트 + 소스별 알람 |
 | 소스 운영자의 차단 요청 | 상 | 중 | 사전 고지·제휴 문의(§3.4). `sources.is_enabled` 플래그로 즉시 중단 가능한 구조 |
 | 잘못된 병합으로 인한 신뢰 하락 | 중 | 중 | 정밀도 우선 정책, `merge_candidates` 보류 큐, 되돌릴 수 있는 병합 |
 | 봇 차단(Cloudflare 등) | 중 | 중 | 대상 소스 재검토. **우회 시도하지 않고 해당 소스 제외** |

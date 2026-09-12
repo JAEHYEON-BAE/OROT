@@ -44,11 +44,31 @@ MAX_INSTANCES: Final = 1
 _alerts: ThrottledAlerts | None = None
 
 
-async def tick(sender: PushSender | None = None, alerts: ThrottledAlerts | None = None) -> None:
-    """한 번의 검사. 실패해도 스케줄러를 멈추지 않는다.
+# ─── 알림 문구 (T-116) ──────────────────────────────────────────
+#
+# **문구를 바꾸려면 여기만 고치면 된다.** 로직을 건드릴 필요가 없도록 한곳에 모았다.
+# `{이름}` 자리는 아래 코드가 채운다 — 이름을 바꾸거나 지우면 `KeyError` 가 난다.
+# Slack 마크다운이라 `*굵게*`, `_기울임_`, `` `코드` ``, `<!channel>` 을 쓸 수 있다.
+#
+# 메시지를 감싸는 형식(제목 접두사, 블록 구조)은 `slack_alerter.py` 에 있다.
 
-    두 단계다 — **이벤트를 만들고, 만들어진 것을 보낸다.**
-    두 단계 모두 멱등하므로 중간에 죽어도 다음 주기가 이어받는다.
+TICK_FAILED_TITLE = "스케줄러 주기 실패"
+TICK_FAILED_DETAIL = (
+    "예외: `{exception}`\n*모든 알림 중단*`docker compose logs collector` 를 확인하십시오."
+)
+
+EXHAUSTED_TITLE = "알림 {count}건이 전달 실패"
+EXHAUSTED_DETAIL = (
+    "재시도 {attempts}회 모두 실패.\n"
+    "`notification_deliveries` 에서 `status='FAILED'` 인 행의 `last_error` 를 확인하십시오."
+)
+
+
+async def tick(sender: PushSender | None = None, alerts: ThrottledAlerts | None = None) -> None:
+    """스케줄러 주기 검사.
+
+    1단계: 이벤트 생성
+    2단계: 이벤트 송신
     """
     started = datetime.now(UTC)
     settings = get_settings()
@@ -75,12 +95,8 @@ async def tick(sender: PushSender | None = None, alerts: ThrottledAlerts | None 
         await alerter.send(
             Alert(
                 key="scheduler.tick_failed",
-                title="스케줄러 주기가 실패했습니다",
-                detail=(
-                    f"예외: `{type(exc).__name__}`\n"
-                    "이 상태가 계속되면 *모든 알림이 멈춥니다.* "
-                    "`docker compose logs collector` 를 확인하십시오."
-                ),
+                title=TICK_FAILED_TITLE,
+                detail=TICK_FAILED_DETAIL.format(exception=type(exc).__name__),
             ),
             now=started,
         )
@@ -116,35 +132,26 @@ def _default_alerts() -> ThrottledAlerts:
 async def _report(alerts: ThrottledAlerts, dispatch: DispatchResult, *, now: datetime) -> None:
     """주기 결과에서 **사람이 손대야 하는 것만** 골라 알린다 (T-116).
 
-    실패(`failed`)는 알리지 않는다 — 다음 주기에 다시 시도하므로 대개 저절로 낫는다.
+    두 가지를 일부러 알리지 않는다.
+
+    - **실패(`failed`)** — 다음 주기에 다시 시도하므로 대개 저절로 낫는다.
+    - **구독 해제(`deactivated`)** — 사용자가 앱을 지우거나 알림을 끈 것이다.
+      정상적인 이탈이라 운영자가 할 일이 없고, **사용자가 늘수록 늘어나기만 한다.**
+
+      원래는 "한꺼번에 많이 꺼지면 설정 문제"라고 보고 알렸는데 **근거가 틀렸다.**
+      VAPID 키가 어긋나면 푸시 서비스는 403 을 돌려주고, 403 은 `GONE`(404/410)이
+      아니라 `FAILED` 라서 재시도 끝에 `exhausted` 로 잡힌다 —
+      정말 위험한 경우는 이미 다른 알림이 담당한다.
+      수치는 `scheduler.tick` 로그의 `deactivated` 에 남으므로 필요하면 센다.
+
     매번 알리면 채널이 묻히고, 그러면 사람이 알림을 꺼 버린다. 알림이 없는 것과 같아진다.
     """
     if dispatch.exhausted:
         await alerts.send(
             Alert(
                 key="push.retry_exhausted",
-                title=f"알림 {dispatch.exhausted}건이 끝내 전달되지 않았습니다",
-                detail=(
-                    f"재시도 {MAX_ATTEMPTS}회를 모두 쓰고 실패했습니다. "
-                    "해당 구독자는 이 알림을 받지 못합니다.\n"
-                    "`notification_deliveries` 에서 `status='FAILED'` 인 행의 "
-                    "`last_error` 를 확인하십시오."
-                ),
-            ),
-            now=now,
-        )
-
-    if dispatch.deactivated:
-        # 정상적인 이탈이다. 다만 한꺼번에 많이 꺼지면 우리 쪽 설정 문제일 수 있다.
-        await alerts.send(
-            Alert(
-                key="push.subscriptions_deactivated",
-                title=f"구독 {dispatch.deactivated}건이 만료되어 해제되었습니다",
-                detail=(
-                    "푸시 서비스가 404/410 을 돌려준 구독입니다. "
-                    "사용자가 앱을 지웠거나 알림을 껐을 때 정상적으로 일어납니다.\n"
-                    "한 번에 여러 건이 꺼졌다면 VAPID 키나 발송 설정을 확인하십시오."
-                ),
+                title=EXHAUSTED_TITLE.format(count=dispatch.exhausted),
+                detail=EXHAUSTED_DETAIL.format(attempts=MAX_ATTEMPTS),
             ),
             now=now,
         )

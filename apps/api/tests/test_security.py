@@ -116,3 +116,33 @@ async def test_api_body_limit_precedes_parser(length, chunks, expected):
         send,
     )
     assert sent[0]["status"] == expected
+
+
+# ─── 설정 repr 유출 (T-116 검증 중 발견) ────────────────────────
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["admin_api_key", "vapid_private_key", "slack_webhook_url", "database_url"],
+)
+def test_secrets_never_appear_in_settings_repr(field: str) -> None:
+    """**트레이스백이 지역 변수를 `repr()` 로 찍는다.**
+
+    `settings` 를 들고 있는 함수가 예외를 던지면 운영자 키·VAPID 개인키·DB 암호·
+    웹훅 URL 이 통째로 로그에 박힌다. 실제로 스케줄러 주기 실패에서 그렇게 나갔다.
+    로그를 수집하는 환경으로 옮기면 그대로 사고가 된다.
+    """
+    marker = f"__{field}_should_not_be_printed__"
+    settings = Settings(_env_file=None, **{field: marker, "environment": "local"})  # type: ignore[arg-type]
+
+    assert getattr(settings, field) == marker, "값 자체는 읽을 수 있어야 한다"
+    assert marker not in repr(settings)
+    assert field not in repr(settings)
+
+
+def test_non_secret_settings_stay_visible() -> None:
+    """전부 가리면 로그로 디버깅할 수 없다. 비밀만 빼야 한다."""
+    rendered = repr(Settings(_env_file=None, environment="local"))
+    assert "environment=" in rendered
+    assert "public_web_url=" in rendered
+    assert "vapid_subject=" in rendered

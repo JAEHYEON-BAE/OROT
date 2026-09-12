@@ -1,6 +1,8 @@
 """Explicit PostgreSQL check: isolated schema, outer rollback, fake push only.
 
-Run inside the API container with stdin; never imported by the default test suite.
+Run with venv/bin/python apps/api/tests/integration_runtime.py and DATABASE_URL set.
+CI runs this after migrations on disposable PostgreSQL; the default test suite excludes it.
+The checks use their own ORM-created schema, not the migrated schema directly.
 """
 
 import asyncio
@@ -114,6 +116,19 @@ async def exhausted_retries(session):
     assert sender.calls == 3
     assert delivery.attempts == 3 and delivery.status == DeliveryStatus.FAILED
 
+    # 소진은 **정확히 한 번만** 보고되어야 한다 (T-116). 매 주기 다시 세면
+    # 운영자 알림이 끝없이 나가고, 그러면 사람이 알림을 꺼 버린다.
+    counted = 0
+    for minutes in (0, 2, 6, 10, 60, 120):
+        result = await dispatch_pending(
+            session,
+            FakeSender(SendOutcome.FAILED),
+            base_url="https://example.invalid",
+            now=now + timedelta(minutes=minutes),
+        )
+        counted += result.exhausted
+    assert counted == 0, "이미 소진된 배송을 다시 세면 안 된다"
+
 
 async def sender_exception(session):
     now = datetime.now(UTC)
@@ -153,6 +168,9 @@ async def gone(session):
     sender = FakeSender(SendOutcome.GONE)
     result = await dispatch_pending(session, sender, base_url="https://example.invalid", now=now)
     assert result.expired == 2 and sender.calls == 1
+    # 구독 하나가 꺼졌다. 배송 2건이 만료됐지만 **해제는 한 번**이어야 한다 (T-116) —
+    # 구독 수로 세지 않고 배송 수로 세면 운영자에게 부풀려진 숫자가 간다.
+    assert result.deactivated == 1
 
 
 async def admin_flow(session):
