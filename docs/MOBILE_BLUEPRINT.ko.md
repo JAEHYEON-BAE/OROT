@@ -1,10 +1,10 @@
 # OROT — 모바일 앱 개발 블루프린트
 
-> 작성: 2026-09-13 · 버전 0.1.0 · 상태: 구현 전 개발 계획
+> 작성: 2026-09-13 · 버전 0.2.0 · 상태: T-033 첫 단계 mock 뼈대 구현, 나머지는 계획
 > 선택된 방향: React Native + Expo + TypeScript, iOS 우선, Android 확장 가능 구조.
 > 서버: 기존 Mac mini + Docker Compose + Tailscale Funnel 유지.
 > 검증 기기: 사용자의 iPhone 14와 Mac mini의 iOS Simulator.
-> 이 문서는 빌드·푸시·배포 완료 보고서가 아니다. 아래 신규 경로, API, 설정, 테스트 도구는 명시된 단계에서 구현할 계획이다.
+> 첫 단계 현황은 [검증 기록](mobile-validation/T-033-scaffold.ko.md)을 따른다. `apps/mobile` mock 앱·로컬 빌드·테스트 기반이 추가되었고, 실제 API·모바일 푸시·TestFlight는 미구현이다. 아래 전체 설계가 완료되었다는 뜻은 아니다.
 
 [기존 한국어 명세](BLUEPRINT.ko.md) · [English blueprint](BLUEPRINT.en.md) · [도메인과 모바일 호스팅](MOBILE_APP_DOMAIN_AND_HOSTING.ko.md) · [모바일 결정 기록](adr/0009-expo-mobile-app.md)
 
@@ -78,7 +78,7 @@
 | 공개 프록시 | `/api/push/*`, RSS/ICS의 고정 경로 | 네이티브 기기용 경로 별도 구현 |
 | 알림 | WEB 대상 선택, WebPushSender, 60초 tick | 모바일 대상 선택·sender·receipt 처리 |
 | 기기 스키마 | `platform` CHECK는 IOS/WEB만 허용 | Android와 제공자/환경 구분 마이그레이션 |
-| 앱 | `apps/api`, `apps/collector`, `apps/web`만 존재 | `apps/mobile` 생성 |
+| 앱 | `apps/mobile` mock 피드/상세/설정 뼈대 추가 | 실제 API·푸시·배포 후속 |
 | 계정/워치리스트 | 일부 테이블만 존재, 제품 기능은 후속 | 최초 버전의 의존성으로 두지 않음 |
 
 근거: `apps/api/src/orot_api/routers/{feed,releases,push}.py`, `apps/web/lib/proxy.ts`, `packages/core/src/orot_core/{notifications,enums}.py`, `packages/core/src/orot_core/models/user.py`.
@@ -241,7 +241,7 @@ DB 잠금/unique 제약만으로 외부 전송과 DB 커밋을 원자화할 수 
 
 ## 6. 저장소 구조
 
-아래는 새로 만들 예정인 구조다. 앱 루트의 package-lock으로 독립 설치하며 초기에 저장소 전체를 npm workspace로 개편하지 않는다.
+아래는 목표 구조다. `apps/mobile`과 mock 피드/상세/설정·tests는 생성되었고, features/notifications·lib/api·storage·e2e·eas.json은 후속이다. 앱 루트의 package-lock으로 독립 설치하며 초기에 저장소 전체를 npm workspace로 개편하지 않는다.
 
 ```text
 apps/mobile/
@@ -324,6 +324,8 @@ docker compose ps
 무료 Personal Team의 UI 설치 가능성과 원격 푸시/TestFlight 가능성을 혼동하지 않는다. 가입·요금은 계정 화면에서 직접 확인한다. [Expo 개발 빌드](https://docs.expo.dev/develop/development-builds/introduction/), [iOS Simulator 준비](https://docs.expo.dev/workflow/ios-simulator/)
 
 ### 8.2 단계 1 — 앱 생성과 버전 고정: T-033
+
+2026-09-13 구현: 앱 폴더는 이미 존재한다. 아래 생성 명령을 다시 실행하지 말고 `apps/mobile/README.md`의 npm ci·실행 명령을 사용한다. 현재 Xcode 26.2에 맞춰 Expo 55.0.31 / React Native 0.83.10 / React 19.2.0 / Node 22.23.2를 선택했다. Xcode 업데이트 후 SDK 57+ 이전을 검증한다.
 
 아래 명령은 `apps/mobile`이 아직 없을 때 한 번 실행할 시작점이다. 기존 폴더가 있으면 먼저 내용을 확인하고 덮어쓰지 않는다. 실행일의 create-expo-app 안내에서 development build용 안정 SDK를 확인한다. 생성 직후 package-lock과 사용 버전을 고정하고 이후 재현은 npm ci로 한다.
 
@@ -543,7 +545,7 @@ API·DB는 loopback을 유지한다. 프록시 변경은 production web 재빌�
 
 ## 10. 단계별 백로그
 
-기존 ID를 유지하되 Swift 전용 산출물을 Expo 산출물로 대체한다. 아래는 모두 계획이며 체크박스가 채워졌다는 뜻이 아니다. M5·M6 숫자 순서보다 다음 의존성 순서로 실행한다.
+기존 ID를 유지하되 Swift 전용 산출물을 Expo 산출물로 대체한다. T-033의 환경 확인·mock 뼈대·Simulator 첫 실행은 구현/검증되었다. 그 밖의 항목은 계획이며 T-033 전체 완료는 아니다. M5·M6 숫자 순서보다 다음 의존성 순서로 실행한다.
 
 | 순서 | 기존 ID | 구현 범위 | 완료 조건 |
 |---|---|---|---|

@@ -5,7 +5,7 @@
 
 ## Context
 
-The owner selected React Native + Expo + TypeScript, retaining the Mac mini and Tailscale Funnel. An iPhone 14 and local Simulator are available. Previous blueprint §8 proposed SwiftUI; no native app has been implemented.
+The owner selected React Native + Expo + TypeScript, retaining the Mac mini and Tailscale Funnel. An iPhone 14 and local Simulator are available. Previous blueprint §8 proposed SwiftUI; the initial plan had no native app. T-033 now provides a local mock scaffold; production API and push remain pending.
 
 ## Accepted direction
 

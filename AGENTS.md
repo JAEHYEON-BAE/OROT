@@ -33,6 +33,8 @@ owner-approved prelaunch change. Keep them stable. Active DB/backup identities w
 - `apps/web/`: Next.js App Router, React, TypeScript, Tailwind CSS, and service
   worker. Follow its nested `AGENTS.md`; read the relevant installed Next.js
   guide under `apps/web/node_modules/next/dist/docs/` before writing web code.
+- `apps/mobile/`: Expo SDK 55 + TypeScript mock scaffold. Follow its nested
+  `AGENTS.md`; use Node 22 and keep generated native projects out of Git.
 - Each Python package has a `tests/` directory. Saved source HTML belongs in
   `apps/collector/tests/fixtures/<source_id>/`.
 - `migrations/`: Alembic revisions; `docs/api/openapi.json`: API schema snapshot;

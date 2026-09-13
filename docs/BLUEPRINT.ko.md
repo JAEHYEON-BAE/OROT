@@ -733,7 +733,9 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**계획 경로**: `apps/mobile/`, `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
+**현재 모바일 경로**: `apps/mobile/` (mock 앱; native `ios/`·`android/`는 생성 파일).
+
+**계획 경로**: `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
 core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
 `infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.devcontainer/`는 현재 없다.
 이 경로들은 향후 작업을 위한 예약이며, 이 표만으로 구현·활성화하지 않는다.
@@ -774,9 +776,9 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 
 ---
 
-## 8. 모바일 애플리케이션 — Expo 계획 (미구현)
+## 8. 모바일 애플리케이션 — Expo 뼈대와 후속 계획
 
-> 2026-09-13 사용자 선택: React Native + Expo + TypeScript, iOS 우선 및 Android 확장 가능 구조. 기존 SwiftUI·SwiftData·Swift 클라이언트 계획을 대체한다. 모바일 구현 완료를 의미하지 않는다.
+> 2026-09-13 사용자 선택: React Native + Expo + TypeScript, iOS 우선 및 Android 확장 가능 구조. 기존 SwiftUI·SwiftData·Swift 클라이언트 계획을 대체한다. T-033 첫 단계의 mock 앱 뼈대가 구현되었다. 실제 API·푸시·배포는 후속이다.
 
 ### 8.1 범위와 상세 명세
 
@@ -784,7 +786,7 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 
 ### 8.2 앱과 서버 연결
 
-`apps/mobile/`을 계획 경로로 예약한다. 기존 Python API를 신규 고정 `/api/mobile/v1/*` 웹 프록시로 연결한다. Mac mini + Funnel, API/DB loopback을 유지한다. React Native 화면은 새로 구현하고 서버는 재사용한다. Expo 지원 버전 조합과 development build로 시작해 TestFlight로 검증한다. Metro는 개발 전용이며 Funnel과 별개다.
+`apps/mobile/`에 SDK 55·TypeScript strict·Router 기반 mock 피드/상세/설정과 테스트가 있다. [첫 단계 검증](mobile-validation/T-033-scaffold.ko.md)을 참고한다. 기존 Python API를 신규 고정 `/api/mobile/v1/*` 웹 프록시로 연결한다. Mac mini + Funnel, API/DB loopback을 유지한다. React Native 화면은 새로 구현하고 서버는 재사용한다. Expo 지원 버전 조합과 development build로 시작해 TestFlight로 검증한다. Metro는 개발 전용이며 Funnel과 별개다.
 
 ### 8.3 알림과 진행 순서
 
@@ -1035,7 +1037,7 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-031 | 워치리스트 ↔ 이벤트 매칭 쿼리 | 키워드 매칭 포함 단위 테스트 |
 | T-032 | 웹 워치리스트 화면 | 로그인 후 CRUD 동작 |
 
-### M5 — 모바일 앱 (Expo, iOS 우선; 계획)
+### M5 — 모바일 앱 (Expo, iOS 우선; T-033 첫 단계 구현)
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|

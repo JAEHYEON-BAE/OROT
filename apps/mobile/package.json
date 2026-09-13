@@ -1,0 +1,49 @@
+{
+  "name": "orot-mobile",
+  "main": "expo-router/entry",
+  "version": "0.1.0",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "start:simulator": "NODE_OPTIONS=--dns-result-order=ipv4first expo start --dev-client --localhost --ios",
+    "generate:api": "openapi-typescript ../../docs/api/openapi.json -o src/lib/api/schema.ts"
+  },
+  "dependencies": {
+    "expo": "~55.0.31",
+    "expo-constants": "~55.0.17",
+    "expo-dev-client": "~55.0.40",
+    "expo-font": "~55.0.8",
+    "expo-linking": "~55.0.17",
+    "expo-router": "~55.0.18",
+    "expo-splash-screen": "~55.0.25",
+    "expo-status-bar": "~55.0.6",
+    "expo-system-ui": "~55.0.22",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.10",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.23.0",
+    "react-native-web": "~0.21.0"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "29.5.14",
+    "@types/react": "~19.2.2",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~55.0.1",
+    "jest": "~29.7.0",
+    "jest-expo": "~55.0.22",
+    "openapi-typescript": "^7.13.0",
+    "react-test-renderer": "19.2.0",
+    "typescript": "~5.9.2"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0 <23"
+  }
+}

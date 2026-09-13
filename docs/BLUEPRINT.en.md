@@ -729,7 +729,9 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**Reserved future paths:** `apps/mobile/`, `apps/api/src/orot_api/services/`, collector `pipeline.py`,
+**Current mobile path:** `apps/mobile/` (mock app; native `ios/` and `android/` are generated).
+
+**Reserved future paths:** `apps/api/src/orot_api/services/`, collector `pipeline.py`,
 core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
 `infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh` and `.devcontainer/` do not exist.
 These are reserved for future tasks; their listing does not authorize creating or activating them.
@@ -770,9 +772,9 @@ There is no generated client, api-types.ts or openapi-typescript dependency. Gen
 
 ---
 
-## 8. Mobile Application — Expo Plan (Not Implemented)
+## 8. Mobile Application — Expo Scaffold and Remaining Plan
 
-> Updated 2026-09-13: the owner selected React Native + Expo + TypeScript, iOS first, with Android portability. This supersedes the previous SwiftUI/SwiftData/Swift client plan. No mobile implementation is claimed.
+> Updated 2026-09-13: the owner selected React Native + Expo + TypeScript, iOS first, with Android portability. This supersedes the previous SwiftUI/SwiftData/Swift client plan. The T-033 first-step mock scaffold is implemented; live API, push and distribution remain pending.
 
 ### 8.1 Scope and source of truth
 
@@ -780,7 +782,7 @@ Follow the detailed [mobile blueprint](MOBILE_BLUEPRINT.ko.md) for architecture,
 
 ### 8.2 Architecture and app
 
-Reserve `apps/mobile/`. Reuse Python APIs through explicit `/api/mobile/v1/*` web proxies to be implemented; preserve Mac mini + Funnel and loopback API/DB ports. React Native screens replace web DOM UI, not the backend. Use Expo-supported dependency versions and an iOS development build, then TestFlight. Metro is development-only and separate from Funnel.
+`apps/mobile/` now contains an SDK 55 TypeScript-strict Router scaffold with mock feed/detail/settings and tests. See the [first-step validation](mobile-validation/T-033-scaffold.ko.md). Reuse Python APIs through explicit `/api/mobile/v1/*` web proxies to be implemented; preserve Mac mini + Funnel and loopback API/DB ports. React Native screens replace web DOM UI, not the backend. Use Expo-supported dependency versions and an iOS development build, then TestFlight. Metro is development-only and separate from Funnel.
 
 ### 8.3 Notifications and sequencing
 
@@ -1033,7 +1035,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-031 | Watchlist ↔ event matching query | Unit tested, including keyword matching |
 | T-032 | Web watchlist screen | CRUD works after login |
 
-### M5 — Mobile App (Expo, iOS First; Planned)
+### M5 — Mobile App (Expo, iOS First; T-033 First Step Implemented)
 
 | ID | Task | Acceptance criteria |
 |---|---|---|

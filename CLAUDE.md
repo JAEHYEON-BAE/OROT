@@ -200,11 +200,15 @@ that host services are currently running. See [runtime review](docs/runtime-revi
   targets or deletion permission from old IDs in a document. Real `collector test-push` requires
   user authorization; `--dry-run` only reads targets and prints payloads.
 - **Known deferred work:** normalization/aliases/resolution and crawl persistence; search,
-  accounts/watchlists/iOS; parser canary, Prometheus/Sentry and external host/process outage monitoring.
+  accounts/watchlists/production mobile integration; parser canary, Prometheus/Sentry and external host/process outage monitoring.
 - **Crawler limitations:** `urllib.robotparser` RFC 9309 gaps remain captured by two expected
   failures (ADR-0003); validators live only in memory; preorder/stock ambiguity is deferred
   (ADR-0001). Review these before wiring M3. Fixture/source findings are dated observations,
   not proof of current third-party site behavior.
+
+- **Mobile T-033 first step (2026-09-13):** `apps/mobile` contains an Expo SDK 55
+  TypeScript mock feed/detail/settings scaffold. API integration, native push and
+  distribution remain pending. See `docs/mobile-validation/T-033-scaffold.ko.md`.
 
 Update this section when implementation changes. Keep volatile DB state and host-specific registrations
 out of enduring rules.

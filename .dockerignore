@@ -21,3 +21,6 @@ apps/web/.next/
 backups/
 *.sql.gz
 .playwright-mcp/
+
+# Mobile build products are not part of server images.
+apps/mobile/
