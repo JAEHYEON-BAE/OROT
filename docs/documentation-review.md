@@ -149,3 +149,42 @@ marker가 있었다. 정상 wheel을 빌드하여 두 marker가 배포 파일에
 - 후속 날짜 알림을 방지하도록 더미에는 발매/예약 날짜를 지정하지 않았다. 알림 링크 확인을 위해
   일정은 유지했다. 생성 기록은 로컬 `backups/orot-live-dummy-20260912.jsonl`에 남겼다.
   Slack 테스트 발송은 수행하지 않았다.
+
+
+## 운영 식별자까지 OROT 이전 — 2026-09-12
+
+사용자가 서비스 일시 중단과 DB·볼륨·백업·키체인 이전을 명시적으로 승인했다.
+앞선 기록의 기존 식별자 보존 방침은 이 이전으로 대체한다.
+
+- `.env`의 DB 사용자/이름은 `orot`, 볼륨은 `orot_postgres_data`, 백업 키체인 서비스는
+  `orot-env-backup`, iCloud 백업 폴더는 `OROT`으로 변경했다. DB 비밀번호는 새 무작위
+  값으로 교체하고 DATABASE_URL에 반영했다. VAPID·관리자·Slack 키는 유지했다.
+- 쓰기 서비스를 중단하고 DB를 덤프한 뒤 새 볼륨에 복원했다. 이전 전후 **14개 테이블**의
+  행 수가 모두 일치했다(발매 4, 아티스트 7, 기기 토큰 4, 이벤트 16, 배송 기록 24).
+  이후 이전 이름이 남은 테스트 아티스트 1건의 표시명/정규화 이름을 수정했다.
+- API·collector·web을 새 환경으로 재생성했다. Postgres/API healthy, 웹 HTTP 200,
+  `/healthz`의 DB 연결 정상. 실행 컨테이너 환경과 `.env`의 이전 이름 잔여 없음.
+- 새 키체인·새 경로로 `.env` 암호화 백업 성공. 복호화 결과가 현재 `.env`와 바이트 단위로
+  일치함을 확인했다. 비밀 값은 출력하지 않았다.
+- 소스·문서·로컬 도구 설정·LaunchAgents·venv 실행 파일과 설치 메타데이터를 점검했다.
+  `.claude/settings.local.json`에 남은 이전 프로젝트 경로를 수정했다. 로컬/API/collector
+  `pip check`와 `git diff --check` 통과. 현재 Git 원격 URL에도 이전 브랜드 잔여 없음.
+- 기존 볼륨·키체인 항목·과거 백업은 복구 자료로 보존한다. 이전 직전 설정(권한 600),
+  DB 덤프 및 행 수 대조는 로컬 `backups/orot-env-migration-20260912-175532/`에 있다.
+  현재 서비스는 새 식별자만 사용한다. 음반 재질과 외부 사이트 원문 속 vinyl은 유지한다.
+- 이번 검증에서는 실제 Push/Slack 시험 알림을 추가 발송하지 않았다.
+
+
+## 외부 라이브러리 타입 진단 및 검사 범위 확대 — 2026-09-12
+
+APScheduler의 두 import와 pywebpush의 `import-untyped`를 확인했다. 루트 `mypy.ini`에서
+두 라이브러리만 `follow_untyped_imports`로 실제 소스를 분석하도록 했다. 전체 오류 무시나
+site-packages 변경은 하지 않았다. 편집기는 같은 설정과 프로젝트 환경의 mypy를 사용한다.
+개발 의존성에 mypy 최소 버전 1.15와 collector의 types-requests를 명시했다.
+
+확장 검사에서 발견한 requests Session 재정의, pywebpush의 문자열 반환 가능성,
+SQLAlchemy 페이지네이션 비교, 어댑터 생성자 계약을 정정했다. 리다이렉트 차단은
+PreparedRequest 전송 단계에서 유지한다. core strict 검사에서 DB ping의 bool 반환도 명시했다.
+`make lint`와 이를 호출하는 CI는 이제 전체 소스·테스트 및 별도 core strict를 검사한다.
+전체 77개 파일의 mypy, core 21개 파일 strict, Ruff 및 Python 418개 테스트 통과
+(2 xfailed, 기존 Starlette/httpx 경고). 실제 외부 알림은 시험 발송하지 않았다.

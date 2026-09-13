@@ -151,10 +151,11 @@ install: venv  ## 모든 패키지를 editable 로 설치
 test:  ## pytest (packages/core, apps/api, apps/collector)
 	$(VENV_PY) -m pytest $(PKGS) -q
 
-lint:  ## ruff check + format --check + mypy(core strict)
+lint:  ## ruff check + format --check + mypy(source + tests, core strict)
 	$(VENV_PY) -m ruff check $(PKGS)
 	$(VENV_PY) -m ruff format --check $(PKGS)
-	$(VENV_PY) -m mypy packages/core/src
+	$(VENV_PY) -m mypy packages/core/src apps/api/src apps/collector/src packages/core/tests apps/api/tests apps/collector/tests
+	$(VENV_PY) -m mypy --config-file packages/core/pyproject.toml packages/core/src
 
 format:  ## ruff format 적용
 	$(VENV_PY) -m ruff format $(PKGS)

@@ -27,10 +27,11 @@ Before public distribution, the owner chose on 2026-09-12 to unify RSS GUID and 
 UID namespaces as `OROT` in `orot_api/feed_identity.py`: `event-10@OROT`,
 `preorder-1@OROT`, `release-1@OROT`. Keep these IDs stable from now on.
 Existing test subscribers may see these as new items. Display names and filenames also use OROT.
-Existing installations retain DB connection settings and use `POSTGRES_VOLUME_NAME`,
-`POSTGRES_VOLUME_EXTERNAL=true` and `ENV_BACKUP_KEYCHAIN_SERVICE` in `.env` to preserve
-DB and encrypted-backup access. Do not blindly rename physical DB roles, volumes or
-keychain identities. New defaults are `orot`, `orot_postgres_data` and `orot-env-backup`.
+With owner approval on 2026-09-12, the active DB role/database became `orot`, the
+volume `orot_postgres_data`, the backup keychain service `orot-env-backup`, and the
+iCloud backup folder `OROT`. The environment and running containers use these names.
+The old volume, environment and dump remain rollback archives. The active volume is
+explicitly managed with `POSTGRES_VOLUME_EXTERNAL=true`.
 When moving the directory, update local venv paths, LaunchAgents and Compose source mounts.
 Rebranding does not change VAPID keys, public URLs or PWA start_url/scope.
 
@@ -125,7 +126,7 @@ are wired only for manual `collector run --dry-run`; scheduled collection and pe
 | Database | PostgreSQL 16, pg_trgm/unaccent, Alembic | Search/resolution services using these extensions |
 | Scheduler/push | APScheduler every 60 seconds, DB deliveries, pywebpush via asyncio.to_thread | Broker, daily digest and APNs |
 | Collection components | httpx async, selectolax, urllib.robotparser, three adapters | Scheduled persistence, normalization and resolution |
-| Web | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI app and generated clients |
+| Web | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | Expo mobile app and generated clients |
 | Runtime | Docker Compose, Mac mini/colima with Funnel for public testing | EC2/GHCR/SSH deployment |
 | Monitoring/automation | structlog, /healthz, Slack failure alerts, GitHub Actions CI, local tests and backup scripts | Prometheus, Sentry, external liveness monitoring and automated deployment |
 
@@ -728,7 +729,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**Reserved future paths:** `apps/ios/`, `apps/api/src/orot_api/services/`, collector `pipeline.py`,
+**Reserved future paths:** `apps/mobile/`, `apps/api/src/orot_api/services/`, collector `pipeline.py`,
 core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
 `infra/nginx/`, `infra/prometheus/`, `infra/deploy.sh` and `.devcontainer/` do not exist.
 These are reserved for future tasks; their listing does not authorize creating or activating them.
@@ -769,89 +770,27 @@ There is no generated client, api-types.ts or openapi-typescript dependency. Gen
 
 ---
 
-## 8. Native iOS Application (Planned for M5+)
+## 8. Mobile Application — Expo Plan (Not Implemented)
 
-> This is an unimplemented native-app design. apps/ios, Swift models, APNs, JWT and SwiftData are absent.
-> Current iPhone notifications use PWA Web Push; a native app and Apple login are not prerequisites for the current service.
-> Platform/review comparisons below are historical planning context and must be checked again before native work starts.
+> Updated 2026-09-13: the owner selected React Native + Expo + TypeScript, iOS first, with Android portability. This supersedes the previous SwiftUI/SwiftData/Swift client plan. No mobile implementation is claimed.
 
-### 8.1 Implementation Approach — Analysis and Recommendation
+### 8.1 Scope and source of truth
 
-| Approach | Pros | Cons | Verdict |
-|---|---|---|---|
-| **A. WKWebView wrapper** | 1–2 days of work; 100% web reuse | Real risk of rejection under App Store Review Guideline **4.2 (Minimum Functionality)**. No native push, haptics, or offline cache. Scroll feel immediately reads as "web" | Not recommended |
-| **B. Native SwiftUI on the shared REST API** | Genuinely native UX; push, widgets, Live Activities, Spotlight. Client generated from OpenAPI | Screens must be built separately | **Recommended** |
-| C. Hybrid (native shell, some screens in web view) | Compromise | Inherits the drawbacks of both stacks; higher maintenance complexity | Conditional |
+Follow the detailed [mobile blueprint](MOBILE_BLUEPRINT.ko.md) for architecture, commands, iPhone 14/Simulator tests, deployment and task gates. [ADR-0009](adr/0009-expo-mobile-app.md) records the accepted framework/hosting choice and proposed provider/authentication details.
 
-**Recommendation**: adopt **Option B (native SwiftUI)**, for three reasons.
+### 8.2 Architecture and app
 
-1. The stated goal is a **"more user-friendly"** iOS app. A web-view wrapper cannot, by definition, be friendlier than the web.
-2. The core value of this service is **push notification** the instant a preorder opens. Current delivery uses Web Push; native integration is a future choice for app-specific features.
-3. Because the design is API-first, web and iOS share the same contract — the web work is not wasted. "Build the web and leverage it" is realized through **shared API and domain model, not shared UI code.**
+Reserve `apps/mobile/`. Reuse Python APIs through explicit `/api/mobile/v1/*` web proxies to be implemented; preserve Mac mini + Funnel and loopback API/DB ports. React Native screens replace web DOM UI, not the backend. Use Expo-supported dependency versions and an iOS development build, then TestFlight. Metro is development-only and separate from Funnel.
 
-The counter-argument is stated fairly: if shipping something to iOS quickly matters more (learning or portfolio velocity), launching with Option A and converting screen-by-screen is defensible. In that case, implement at minimum the **push notifications, settings screen, and tab bar natively** to reduce 4.2 exposure.
+### 8.3 Notifications and sequencing
 
-### 8.2 Native App Structure
+Keep current Web Push. Expo Push Service via APNs/FCM is a proposal requiring provider-aware migrations, installation management authentication, sender routing and persistent ticket/receipt handling. Existing delivery selection is WEB-only; registration alone cannot enable mobile delivery. iPhone 14 receipt and tap navigation must be verified independently from provider acceptance.
 
-```
-OROT/
-├─ OROTApp.swift              @main, DI container
-├─ Core/
-│  ├─ APIClient.swift               URLSession + async/await
-│  ├─ Generated/                    swift-openapi-generator output
-│  ├─ Models/
-│  ├─ KeychainStore.swift           JWT storage
-│  └─ DesignSystem/                 Color, Typography, Badge
-├─ Features/
-│  ├─ Feed/          FeedView, FeedViewModel (@Observable)
-│  ├─ Search/
-│  ├─ ReleaseDetail/
-│  ├─ Watchlist/
-│  └─ Settings/
-├─ Notifications/
-│  ├─ PushRegistrar.swift           UNUserNotificationCenter + APNs registration
-│  └─ NotificationHandler.swift     deep link → ReleaseDetail
-└─ Widgets/                         v1.1: "this week's releases" widget
-```
+The first app includes public feed/detail, out-links, offline reading and global notification on/off. It does not depend on M3 collection or M4 accounts. Search, watchlists, daily digest and Apple-specific extensions remain deferred. `/v1/feed` has no cursor: do not promise infinite scroll without a new contract.
 
-**Key decisions**
-- Minimum target: iOS 17.0 (enables the `@Observable` macro)
-- Architecture: MVVM — `@Observable` view models with SwiftUI `NavigationStack`
-- Networking: [`swift-openapi-generator`](https://github.com/apple/swift-openapi-generator) turns `openapi.json` into a Swift client. **Hand-written models prohibited**
-- Auth: Sign in with Apple (minimal signup friction, satisfies App Store requirements)
-- Images: `AsyncImage` with an `NSCache` memory cache, loading original URLs directly
-- Offline: SwiftData cache of the 200 most recent feed items
+### 8.4 Tools and verification
 
-### 8.3 Push Notification Pipeline
-
-```
-EventDetector → emits PREORDER_OPEN
-   ↓
-match watchlist_items (ARTIST / LABEL / RELEASE / KEYWORD)
-   ↓
-NotificationDispatcher (FastAPI background task)
-   ↓
-aioapns → APNs (token-based auth, .p8 key)
-   ↓
-iOS: NotificationHandler → deep link orot://release/1042
-```
-
-**Prerequisites**: Apple Developer Program ($99/yr), APNs Auth Key (.p8), Bundle ID, Push Notifications capability.
-
-### 8.4 Division of Labor: VSCode vs Xcode (Important)
-
-VSCode can be the primary IDE, but the iOS portion carries hard constraints.
-
-| Task | VSCode | Xcode |
-|---|---|---|
-| All Python / TypeScript | ✅ | not needed |
-| Editing Swift source | ✅ (Swift extension + SourceKit-LSP) | ✅ |
-| SwiftUI previews | ❌ | ✅ required |
-| Simulator run / debugging | ❌ | ✅ required |
-| Code signing, provisioning, archiving | ❌ | ✅ required |
-| App Store Connect upload | ❌ | ✅ required |
-
-**Conclusion**: use VSCode for backend and web, Xcode alongside it for iOS. Claude Code can run in the VSCode terminal and edit Swift files under `apps/ios/`, with build verification performed in Xcode. (`xcodebuild` works from the VSCode terminal, but previews and visual debugging have no substitute.)
+Use TypeScript editing tools, local Xcode/Simulator, iPhone 14 development builds and signed TestFlight builds. Follow the detailed plan for account requirements and environment separation. Simulator UI, real push, CI and production deployment are distinct gates. No domain purchase or AWS migration is required.
 
 ---
 
@@ -967,6 +906,10 @@ checks and same-origin validation in web ([security review](security-review.md))
 
 ### 9.5 CI/CD Status
 
+`make lint` checks all Python sources/tests with mypy and runs a separate strict core check.
+Root `mypy.ini` enables source analysis only for APScheduler and pywebpush, which lack type markers.
+The editor uses the same configuration; missing imports are not globally suppressed.
+
 `T-012` in `.github/workflows/ci.yml` runs on all PRs, main pushes and manual dispatch.
 The Python 3.12 job runs `make install`, `make lint`, `make test`, applies migrations to disposable
 PostgreSQL 16 with `venv/bin/python -m alembic upgrade head`, then executes
@@ -1056,7 +999,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-134 | Admin login screen | Body stays closed until the key verifies; no re-entry afterwards |
 
 > **Web Push is the first channel** ([ADR-0006](adr/0006-web-push-first.md)). Email is not built.
-> The APNs plan in §8.3 is deferred to iOS app launch, not cancelled.
+> The mobile provider plan in §8.3 replaces direct APNs-only planning and remains unimplemented.
 > T-113 verified event-generation idempotency; T-115 uses delivery records and locks, with no exactly-once guarantee across send/commit failures.
 
 ### M3 — Harvesting Resumed
@@ -1090,26 +1033,28 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-031 | Watchlist ↔ event matching query | Unit tested, including keyword matching |
 | T-032 | Web watchlist screen | CRUD works after login |
 
-### M5 — iOS App
+### M5 — Mobile App (Expo, iOS First; Planned)
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
-| T-033 | Create Xcode project, wire swift-openapi-generator | Builds; generated client calls `/v1/feed` |
-| T-034 | DesignSystem (Color / Typography / StatusBadge) | Dark mode supported |
-| T-035 | FeedView + FeedViewModel | Infinite scroll, pull-to-refresh |
-| T-036 | SearchView, ReleaseDetailView | Out-links open in Safari |
-| T-037 | Sign in with Apple + Keychain | Session persists across relaunch |
-| T-038 | WatchlistView | CRUD works |
-| T-039 | SwiftData offline cache | Recent feed visible in airplane mode |
+| T-033 | Expo TypeScript scaffold, generated API types, fixed read proxies and build profiles | Simulator/iPhone feed works; denied routes stay private; signed build validated in final gate |
+| T-034 | React Native design system | Dark mode, large text and VoiceOver verified |
+| T-035 | Feed screen and request state | Sorting, refresh and error recovery; current feed has no cursor |
+| T-036 | Detail and seller out-links; search deferred | External browser and unpublished/missing 404 handled |
+| T-037 | Account session and secure storage, deferred until T-029 | Session lifecycle verified after account API exists |
+| T-038 | Watchlist UI, deferred until T-030/T-031 | Authorized CRUD and matching verified |
+| T-039 | Versioned public-data offline cache | Relaunch, airplane mode, expiry and online invalidation verified |
 
-### M6 — Native APNs and Push Extensions (Separate from Current Web Push)
+### M6 — Mobile Push (Separate from Web Push; Planned)
 
 | ID | Task | Acceptance criteria |
 |---|---|---|
-| T-040 | `POST /v1/devices` + `device_tokens` | Token register/refresh works |
-| T-041 | `aioapns` dispatcher | Successful send to APNs sandbox |
-| T-042 | iOS push receipt + deep link | Tapping a notification opens the release detail |
-| T-043 | Notification settings (immediate / daily digest / off) | Per-user preference respected |
+| T-040 | Device registration/update/removal, installation auth and provider migration | Ownership, token refresh and existing WEB preservation tested |
+| T-041 | Mobile sender and durable provider outcomes | Fake failures/restarts and targeted iPhone push verified; Expo proposal includes receipts |
+| T-042 | Permission and notification tap navigation | Foreground/background/cold start and invalid payload tested on iPhone |
+| T-043 | Initial global notifications on/off; daily digest deferred | OS permission and server registration state reconciled |
+
+Follow [mobile blueprint §10](MOBILE_BLUEPRINT.ko.md) for substeps. Mobile gates can precede M3/M4. Extend T-012 with mobile checks; retained IDs do not imply implementation or completion of deferred subfeatures.
 
 ### M7 — Operational Hardening
 
@@ -1134,7 +1079,7 @@ recovery and crawler-specific external alerts are not running today. Future miti
 | Bad merges erode trust | Medium | Medium | Precision-first policy, `merge_candidates` hold queue, reversible merges |
 | Bot protection (Cloudflare etc.) | Medium | Medium | Re-evaluate the source. **Do not attempt circumvention — drop the source instead** |
 | Notification too slow, limited edition missed | High | Medium | Current manual schedules use a 60-second tick and bounded retries; a priority queue remains planned |
-| App Store rejection | Medium | Low | Native implementation (Option B), clear content attribution, privacy policy page |
+| App Store rejection | Medium | Low | Useful mobile UI, clear content attribution, privacy policy page; approval is not guaranteed |
 | Solo-developer burnout | Medium | Medium | M0–M3 delivers ~80% of the real value. Ship a genuinely useful state there and pause |
 
 ---

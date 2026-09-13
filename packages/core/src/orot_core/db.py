@@ -54,4 +54,4 @@ async def ping() -> bool:
     """
     async with get_engine().connect() as conn:
         result = await conn.execute(text("SELECT 1"))
-        return result.scalar_one() == 1
+        return bool(result.scalar_one() == 1)

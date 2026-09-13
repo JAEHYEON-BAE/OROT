@@ -1,5 +1,7 @@
 {
   "python.defaultInterpreterPath": "venv/bin/python",
+  "mypy-type-checker.args": ["--config-file=${workspaceFolder}/mypy.ini"],
+  "mypy-type-checker.importStrategy": "fromEnvironment",
   "python.testing.pytestEnabled": true,
   "python.testing.pytestArgs": ["packages/core", "apps/api", "apps/collector"],
   "[python]": {

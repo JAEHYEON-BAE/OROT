@@ -27,10 +27,10 @@ RSS GUID·iCalendar UID는 대중 배포 전 사용자 결정(2026-09-12)에 따
 `orot_api/feed_identity.py`의 `OROT` namespace로 통일했다. 예: `event-10@OROT`,
 `preorder-1@OROT`, `release-1@OROT`. 이후에는 고정 ID의 안정성을 유지한다.
 이전 테스트 구독에서는 항목이 새로 인식될 수 있다. 표시명·다운로드 파일명도 OROT 기준이다.
-기존 설치는 `.env`의 DB 접속 정보와 `POSTGRES_VOLUME_NAME`, `POSTGRES_VOLUME_EXTERNAL=true`,
-`ENV_BACKUP_KEYCHAIN_SERVICE`로 기존 DB·암호화 백업을 이어 쓴다. 이를 새 이름으로
-일괄 치환하면 데이터 접근이 끊기므로 실제 DB 역할·볼륨·키체인 식별자는 보존한다.
-새 설치의 기본값은 `orot`, `orot_postgres_data`, `orot-env-backup`이다.
+2026-09-12 사용자 승인으로 운영 DB 역할·DB 이름을 `orot`, 물리 볼륨을
+`orot_postgres_data`, 백업 키체인을 `orot-env-backup`, iCloud 백업 폴더를 `OROT`으로
+이전했다. `.env`와 실행 컨테이너에 반영했으며 이전 볼륨·설정·덤프는 복구용으로 보존한다.
+`POSTGRES_VOLUME_EXTERNAL=true`로 명시적인 운영 볼륨을 사용한다.
 폴더 이동 시 로컬 venv 경로·LaunchAgent·Compose 소스 마운트를 함께 갱신한다.
 VAPID 키·공개 URL·PWA start_url/scope는 이름 변경으로 바꾸지 않는다.
 
@@ -124,7 +124,7 @@ PostgreSQL ← collector: 60초 tick → 시각 이벤트 → 배송 계획 → 
 | DB | PostgreSQL 16, pg_trgm/unaccent, Alembic | 확장을 이용한 검색·병합 서비스 |
 | 스케줄러·푸시 | APScheduler 60초, DB 배송 기록, pywebpush를 asyncio.to_thread로 호출 | 메시지 브로커·일일 요약·APNs |
 | 수집 부품 | httpx async, selectolax, urllib.robotparser, 3개 어댑터 | 자동 수집 적재·정규화·병합 |
-| 웹 | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | SwiftUI 앱·생성 클라이언트 |
+| 웹 | Next.js 16.3.3 App Router, React 19, Tailwind 4, npm, PWA | Expo 모바일 앱·생성 클라이언트 |
 | 실행 | Docker Compose, Mac mini/colima + Funnel 공개 테스트 | EC2/GHCR/SSH 배포 |
 | 관측·자동화 | structlog, /healthz, Slack 장애 알림, GitHub Actions CI, 로컬 테스트와 백업 스크립트 | Prometheus·Sentry·외부 생존 감시·자동 배포 |
 
@@ -733,7 +733,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**계획 경로**: `apps/ios/`, `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
+**계획 경로**: `apps/mobile/`, `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
 core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
 `infra/nginx/`·`infra/prometheus/`·`infra/deploy.sh`, `.devcontainer/`는 현재 없다.
 이 경로들은 향후 작업을 위한 예약이며, 이 표만으로 구현·활성화하지 않는다.
@@ -774,89 +774,27 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 
 ---
 
-## 8. iOS 네이티브 애플리케이션 (M5 이후 계획)
+## 8. 모바일 애플리케이션 — Expo 계획 (미구현)
 
-> 이 절은 미구현 네이티브 앱 설계안이다. `apps/ios`·Swift 모델·APNs·JWT·SwiftData는 없다.
-> 현재 iPhone 알림은 PWA Web Push이며, 네이티브 앱이나 Apple 로그인은 현재 서비스의 필수 조건이 아니다.
-> 아래 플랫폼·심사 관련 비교는 당시 계획 배경이며, 네이티브 착수 시 다시 확인한다.
+> 2026-09-13 사용자 선택: React Native + Expo + TypeScript, iOS 우선 및 Android 확장 가능 구조. 기존 SwiftUI·SwiftData·Swift 클라이언트 계획을 대체한다. 모바일 구현 완료를 의미하지 않는다.
 
-### 8.1 구현 방식 선택 — 검토와 권고
+### 8.1 범위와 상세 명세
 
-| 방식 | 장점 | 단점 | 평가 |
-|---|---|---|---|
-| **A. WKWebView 래퍼** | 개발 1~2일. 웹 코드 100% 재사용 | App Store 심사 가이드라인 **4.2 (Minimum Functionality)** 로 반려될 위험이 실질적으로 존재. 푸시 알림·햅틱·오프라인 캐시 등 네이티브 경험 부재. 스크롤 감각이 즉시 “웹”으로 인지됨 | 비권장 |
-| **B. 네이티브 SwiftUI + 공용 REST API** | 진정한 네이티브 UX. 푸시·위젯·Live Activity·Spotlight 연동 가능. OpenAPI로 클라이언트 자동 생성 | 화면을 별도 구현해야 함 | **권고** |
-| C. 하이브리드 (네이티브 셸 + 일부 화면 웹뷰) | 절충 | 두 스택의 단점을 모두 상속. 유지보수 복잡도 증가 | 조건부 |
+아키텍처·명령·iPhone 14/Simulator 검증·배포·단계별 완료 조건은 [모바일 블루프린트](MOBILE_BLUEPRINT.ko.md)를 따른다. [ADR-0009](adr/0009-expo-mobile-app.md)는 확정된 프레임워크/호스팅 방향과 제안 상태인 푸시 제공자·설치 인증을 구분한다.
 
-**권고**: **B안(네이티브 SwiftUI)** 을 채택합니다. 근거는 다음과 같습니다.
+### 8.2 앱과 서버 연결
 
-1. 사용자께서 명시한 목표가 “**더 사용자 친화적인** iOS 앱”입니다. 웹뷰 래퍼는 정의상 웹보다 친화적일 수 없습니다.
-2. 이 서비스의 핵심 가치는 **푸시 알림**(예약판매 오픈 즉시 통지)입니다. 현재는 Web Push로 제공하며, 네이티브 통합은 앱 고유 기능을 위한 향후 선택입니다.
-3. API 우선 설계이므로 웹과 iOS가 동일한 계약을 공유하며, 웹 작업이 낭비되지 않습니다. “웹을 만들고 이를 활용”한다는 의도는 **UI 코드 재사용이 아니라 API·도메인 모델 재사용**으로 달성됩니다.
+`apps/mobile/`을 계획 경로로 예약한다. 기존 Python API를 신규 고정 `/api/mobile/v1/*` 웹 프록시로 연결한다. Mac mini + Funnel, API/DB loopback을 유지한다. React Native 화면은 새로 구현하고 서버는 재사용한다. Expo 지원 버전 조합과 development build로 시작해 TestFlight로 검증한다. Metro는 개발 전용이며 Funnel과 별개다.
 
-다만 반대 논거도 명시합니다. 학습·포트폴리오 목적에서 iOS를 빠르게 배포해 보는 것이 우선이라면, A안으로 먼저 출시한 뒤 화면 단위로 네이티브 전환하는 경로도 합리적입니다. 이 경우 최소한 **푸시 알림·설정 화면·탭바는 네이티브로 구현**해야 4.2 리스크를 낮출 수 있습니다.
+### 8.3 알림과 진행 순서
 
-### 8.2 네이티브 앱 구조
+기존 Web Push를 유지한다. Expo Push Service를 통한 APNs/FCM 전달은 제안이며 provider 구분 마이그레이션, 설치 관리 인증, sender 분기, ticket/receipt 영속 처리가 필요하다. 현재 배송 대상 선택은 WEB 전용이므로 모바일 등록만으로 발송되지 않는다. iPhone 14 실제 수신과 탭 이동을 제공자 수락과 별도로 확인한다.
 
-```
-OROT/
-├─ OROTApp.swift              @main, DI 컨테이너
-├─ Core/
-│  ├─ APIClient.swift               URLSession + async/await
-│  ├─ Generated/                    swift-openapi-generator 산출물
-│  ├─ Models/
-│  ├─ KeychainStore.swift           JWT 저장
-│  └─ DesignSystem/                 Color, Typography, Badge
-├─ Features/
-│  ├─ Feed/          FeedView, FeedViewModel (@Observable)
-│  ├─ Search/
-│  ├─ ReleaseDetail/
-│  ├─ Watchlist/
-│  └─ Settings/
-├─ Notifications/
-│  ├─ PushRegistrar.swift           UNUserNotificationCenter + APNs 토큰 등록
-│  └─ NotificationHandler.swift     딥링크 → ReleaseDetail
-└─ Widgets/                         v1.1: 이번 주 발매 위젯
-```
+최초 앱은 공개 피드/상세, 원문 링크, 오프라인 읽기, 전체 일정 알림 on/off다. M3 수집과 M4 계정에 의존하지 않는다. 검색·워치리스트·일간 요약·Apple 전용 확장은 후속이다. 현재 `/v1/feed`는 cursor가 없으므로 계약 확장 없이 무한 스크롤을 약속하지 않는다.
 
-**주요 결정사항**
-- 최소 지원: iOS 17.0 (`@Observable` 매크로 사용 가능)
-- 아키텍처: MVVM. `@Observable` ViewModel + SwiftUI `NavigationStack`
-- 네트워킹: [`swift-openapi-generator`](https://github.com/apple/swift-openapi-generator) 로 `openapi.json` → Swift 클라이언트 자동 생성. **수기 모델 정의 금지**
-- 인증: Sign in with Apple (계정 생성 마찰 최소화, App Store 요구사항 충족)
-- 이미지: `AsyncImage` + `NSCache` 메모리 캐시. 원본 URL 직접 로드
-- 오프라인: SwiftData로 최근 피드 200건 캐시
+### 8.4 도구와 검증
 
-### 8.3 푸시 알림 파이프라인
-
-```
-EventDetector → PREORDER_OPEN 이벤트 생성
-   ↓
-watchlist_items 매칭 쿼리 (ARTIST/LABEL/RELEASE/KEYWORD)
-   ↓
-NotificationDispatcher (FastAPI 백그라운드 태스크)
-   ↓
-aioapns → APNs (token-based auth, .p8 키)
-   ↓
-iOS: NotificationHandler → 딥링크 orot://release/1042
-```
-
-**필요 사항**: Apple Developer Program 연 $99 USD, APNs Auth Key(.p8), Bundle ID, Push Notifications Capability.
-
-### 8.4 VSCode와 Xcode의 역할 분담 (중요)
-
-VSCode를 주 IDE로 사용하시되, iOS 부분에는 제약이 있음을 명확히 밝힙니다.
-
-| 작업 | VSCode | Xcode |
-|---|---|---|
-| Python/TypeScript 전체 | ✅ 가능 | 불필요 |
-| Swift 코드 편집 | ✅ 가능 (Swift 확장 + SourceKit-LSP) | 가능 |
-| SwiftUI 프리뷰 | ❌ 불가 | ✅ 필수 |
-| 시뮬레이터 실행·디버깅 | ❌ 불가 | ✅ 필수 |
-| 코드 서명·프로비저닝·아카이브 | ❌ 불가 | ✅ 필수 |
-| App Store Connect 업로드 | ❌ 불가 | ✅ 필수 |
-
-**결론**: 백엔드·웹은 VSCode, iOS는 Xcode를 병행하십시오. Claude Code는 VSCode 터미널에서 실행하되 `apps/ios/` 디렉터리의 Swift 파일도 편집할 수 있으며, 빌드 검증만 Xcode에서 수행하는 방식이 실용적입니다. (`xcodebuild` CLI로 VSCode 터미널에서 빌드는 가능하나, 프리뷰와 시각적 디버깅은 대체 불가합니다.)
+TypeScript 편집 도구, 로컬 Xcode/Simulator, iPhone 14 개발 빌드와 서명된 TestFlight 빌드를 사용한다. 계정 요구와 환경 분리는 상세 계획서를 따른다. Simulator UI·실제 푸시·CI·운영 배포를 각각 검증한다. 도메인 구매와 AWS 이전은 선행 조건이 아니다.
 
 ---
 
@@ -971,6 +909,10 @@ Slack 실패 후 소진 경보를 보존·재전송하는 큐는 없다.
 
 ### 9.5 CI/CD 상태
 
+`make lint`는 전체 Python 소스·테스트의 mypy 검사와 core의 별도 strict 검사를 실행한다.
+루트 `mypy.ini`는 타입 marker가 없는 APScheduler·pywebpush에만 소스 분석을 허용한다.
+편집기도 같은 설정을 사용하며, 누락된 import를 전역으로 무시하지 않는다.
+
 `T-012`의 `.github/workflows/ci.yml`은 모든 PR, main push, 수동 실행을 지원한다.
 Python 3.12 작업은 `make install`, `make lint`, `make test` 후 임시 PostgreSQL 16에
 `venv/bin/python -m alembic upgrade head`를 적용하고
@@ -1059,7 +1001,7 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-134 | 관리 화면 로그인 | 키 확인 전에는 본문이 열리지 않고, 이후 재입력 불필요 |
 
 > **알림 채널은 Web Push 우선** ([ADR-0006](adr/0006-web-push-first.md)). 이메일은 만들지 않는다.
-> §8.3 의 APNs 는 폐기가 아니라 **iOS 앱 배포 시점으로 미룬 것**이다.
+> §8.3 모바일 제공자 계획이 직접 APNs 전용 계획을 대체하며 아직 미구현이다.
 > T-113 이 검증한 것은 **이벤트 생성** 멱등성이며, **발송** 중복 방지는 T-115의 배송 기록과 잠금으로 수행하되, 전송/커밋 사이의 장애까지 exactly-once를 보장하지 않는다.
 
 ### M3 — 자동 수집 재개
@@ -1093,26 +1035,28 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-031 | 워치리스트 ↔ 이벤트 매칭 쿼리 | 키워드 매칭 포함 단위 테스트 |
 | T-032 | 웹 워치리스트 화면 | 로그인 후 CRUD 동작 |
 
-### M5 — iOS 앱
+### M5 — 모바일 앱 (Expo, iOS 우선; 계획)
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|
-| T-033 | Xcode 프로젝트 생성, swift-openapi-generator 연동 | 빌드 성공, 생성된 클라이언트로 `/v1/feed` 호출 |
-| T-034 | DesignSystem (Color/Typography/StatusBadge) | 다크모드 대응 |
-| T-035 | FeedView + FeedViewModel | 무한 스크롤, Pull-to-refresh |
-| T-036 | SearchView, ReleaseDetailView | 아웃링크 Safari 오픈 |
-| T-037 | Sign in with Apple + Keychain | 재실행 시 세션 유지 |
-| T-038 | WatchlistView | CRUD 동작 |
-| T-039 | SwiftData 오프라인 캐시 | 기내 모드에서 최근 피드 표시 |
+| T-033 | Expo TypeScript 뼈대·생성 API 타입·고정 읽기 프록시·빌드 프로필 | Simulator/iPhone 피드, 비허용 경로 차단, 최종 게이트의 서명 빌드 검증 |
+| T-034 | React Native 디자인 시스템 | 다크 모드·큰 글자·VoiceOver 확인 |
+| T-035 | 피드와 요청 상태 | 정렬·새로고침·오류 복구; 현재 피드는 cursor 없음 |
+| T-036 | 상세와 판매처 링크; 검색 보류 | 외부 브라우저 및 비공개/없는 상세404 처리 |
+| T-037 | 계정 세션·보안 저장; T-029 이후 | 계정 API 구현 후 세션 수명주기 검증 |
+| T-038 | 워치리스트 UI; T-030/031 이후 | 권한 있는 CRUD·매칭 검증 |
+| T-039 | 버전 있는 공개 데이터 캐시 | 재실행·기내 모드·만료·온라인 무효화 검증 |
 
-### M6 — 네이티브 APNs·확장 푸시 (현재 Web Push와 별도)
+### M6 — 모바일 푸시 (Web Push와 별도; 계획)
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|
-| T-040 | `POST /v1/devices` + `device_tokens` | 토큰 등록/갱신 |
-| T-041 | `aioapns` 디스패처 | 샌드박스 APNs 발송 성공 |
-| T-042 | iOS 푸시 수신 + 딥링크 | 알림 탭 → 해당 릴리스 상세 이동 |
-| T-043 | 알림 설정(즉시/일간요약/끄기) | 사용자별 설정 반영 |
+| T-040 | 기기 등록/갱신/해지·설치 인증·provider 마이그레이션 | 소유 검증·토큰 갱신·기존 WEB 보존 테스트 |
+| T-041 | 모바일 sender와 제공자 결과 영속화 | fake 오류/재시작과 지정 iPhone 실제 발송 검증; Expo 제안은 receipt 포함 |
+| T-042 | 권한·알림 탭 이동 | foreground/background/cold start·잘못된 payload 실기기 검증 |
+| T-043 | 최초 전체 일정 알림 on/off; 일간 요약 보류 | OS 권한과 서버 등록 상태 동기화 |
+
+세부 순서는 [모바일 블루프린트 §10](MOBILE_BLUEPRINT.ko.md)을 따른다. M3/M4보다 먼저 진행할 수 있다. T-012에 모바일 검사를 확장한다. 기존 ID 유지가 구현 완료 또는 보류 항목 완료를 의미하지 않는다.
 
 ### M7 — 운영 강화
 
@@ -1137,7 +1081,7 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | 잘못된 병합으로 인한 신뢰 하락 | 중 | 중 | 정밀도 우선 정책, `merge_candidates` 보류 큐, 되돌릴 수 있는 병합 |
 | 봇 차단(Cloudflare 등) | 중 | 중 | 대상 소스 재검토. **우회 시도하지 않고 해당 소스 제외** |
 | 알림 지연으로 한정반 놓침 | 상 | 중 | 현재 수동 일정은 60초 tick·제한된 재시도. 별도 우선순위 큐는 미구현 |
-| iOS 심사 반려 | 중 | 하 | 네이티브 구현(B안), 명확한 콘텐츠 귀속 표기, 개인정보처리방침 페이지 준비 |
+| iOS 심사 반려 | 중 | 하 | 유용한 모바일 UI·콘텐츠 귀속·개인정보처리방침 준비; 승인 보장 없음 |
 | 단독 개발자 번아웃 | 중 | 중 | M0~M3까지가 실사용 가치의 80%. 여기서 일단 “쓸 만한 상태”로 마감하고 휴지기 |
 
 ---

@@ -109,6 +109,10 @@ class SourceAdapter(Protocol):
     crawl_interval_seconds: int  # 최소 300
     requires_javascript: bool
 
+    def __init__(self, fetcher: PageFetcher | None = None) -> None:
+        """Allow the collector to inject its rate-limited page fetcher."""
+        ...
+
     def discover(self) -> AsyncIterator[str]:
         """**수집 대상 페이지** URL 을 순회 반환한다.
 

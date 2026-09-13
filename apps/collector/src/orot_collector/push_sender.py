@@ -34,15 +34,17 @@ REQUEST_TIMEOUT: Final = 10
 class _PushSession(requests.Session):
     """Never follow redirects outside the validated push endpoint."""
 
-    def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+    def send(self, request: requests.PreparedRequest, **kwargs: Any) -> requests.Response:
         kwargs["allow_redirects"] = False
-        return super().request(method, url, **kwargs)
+        return super().send(request, **kwargs)
 
 
 def _send_push(**kwargs: Any) -> requests.Response:
     # One session per worker call; no shared mutable Session between threads.
     with _PushSession() as session:
         response = webpush(requests_session=session, **kwargs)
+        if isinstance(response, str):
+            raise TypeError("Expected a push response, not a curl command")
         if not 200 <= response.status_code < 300:
             raise WebPushException("Push service rejected delivery", response=response)
         return response

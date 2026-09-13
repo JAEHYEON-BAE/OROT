@@ -4,15 +4,16 @@
 새어 나가면 아직 공지되지 않은 발매가 유출된다 — 이 API 의 가장 중요한 불변식이다.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from orot_core.models import Release
 from pydantic import BaseModel, Field
-from sqlalchemy import Select, func, literal_column, select
+from sqlalchemy import Select, func, literal, literal_column, select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from orot_api.caching import set_cache_headers
 from orot_api.deps import SessionDep
@@ -80,7 +81,9 @@ async def list_releases(
             last_key, last_id = decode_cursor(cursor)
         except InvalidCursorError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-        key_value = literal_column("'infinity'::timestamptz") if last_key is None else last_key
+        key_value: ColumnElement[datetime] = (
+            literal_column("'infinity'::timestamptz") if last_key is None else literal(last_key)
+        )
         # keyset: (정렬키, id) 가 커서보다 뒤인 행만.
         statement = statement.where(
             (key_value < _SORT_KEY) | ((key_value == _SORT_KEY) & (Release.id > last_id))

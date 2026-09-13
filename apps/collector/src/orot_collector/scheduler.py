@@ -130,22 +130,6 @@ def _default_alerts() -> ThrottledAlerts:
 
 
 async def _report(alerts: ThrottledAlerts, dispatch: DispatchResult, *, now: datetime) -> None:
-    """주기 결과에서 **사람이 손대야 하는 것만** 골라 알린다 (T-116).
-
-    두 가지를 일부러 알리지 않는다.
-
-    - **실패(`failed`)** — 다음 주기에 다시 시도하므로 대개 저절로 낫는다.
-    - **구독 해제(`deactivated`)** — 사용자가 앱을 지우거나 알림을 끈 것이다.
-      정상적인 이탈이라 운영자가 할 일이 없고, **사용자가 늘수록 늘어나기만 한다.**
-
-      원래는 "한꺼번에 많이 꺼지면 설정 문제"라고 보고 알렸는데 **근거가 틀렸다.**
-      VAPID 키가 어긋나면 푸시 서비스는 403 을 돌려주고, 403 은 `GONE`(404/410)이
-      아니라 `FAILED` 라서 재시도 끝에 `exhausted` 로 잡힌다 —
-      정말 위험한 경우는 이미 다른 알림이 담당한다.
-      수치는 `scheduler.tick` 로그의 `deactivated` 에 남으므로 필요하면 센다.
-
-    매번 알리면 채널이 묻히고, 그러면 사람이 알림을 꺼 버린다. 알림이 없는 것과 같아진다.
-    """
     if dispatch.exhausted:
         await alerts.send(
             Alert(

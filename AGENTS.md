@@ -21,7 +21,7 @@ draft ADR before requesting a decision; do not invent a task ID for maintenance.
 
 Use **OROT** for the service and project directory; use `orot` in tool identifiers
 and `orot_*` in Python imports. Feed IDs use the `OROT` namespace after the
-owner-approved prelaunch change. Keep them stable and preserve existing DB/backup identities. The word vinyl in record materials and source fixtures is not branding.
+owner-approved prelaunch change. Keep them stable. Active DB/backup identities were migrated to orot on 2026-09-12; retain rollback archives. The word vinyl in record materials and source fixtures is not branding.
 
 ## Repository map
 
@@ -49,7 +49,7 @@ to `.venv/`. Python requires 3.12 or later.
 
 ```sh
 make install       # Create venv and install all three Python packages editable
-make lint          # Ruff check, format check, and mypy on core
+make lint          # Ruff check, format check, and mypy on all Python sources/tests plus core strict
 make test          # Pytest across core, API, and collector
 make format        # Mutating Ruff format and fixes; inspect resulting scope
 make openapi       # Regenerate docs/api/openapi.json after API contract changes

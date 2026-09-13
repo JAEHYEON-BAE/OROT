@@ -116,7 +116,7 @@ do not start/rebuild services or send notifications just to validate prose.
 
 ### Naming
 - Service/project name: **OROT**. Tool identifiers: `orot`; Python packages: `orot_*`.
-- Feed UID/GUID namespace is `OROT` (owner-approved prelaunch change, 2026-09-12). Keep it stable going forward; preserve physical DB/backup identities.
+- Feed UID/GUID namespace is `OROT` (owner-approved prelaunch change, 2026-09-12). Keep it stable going forward; active DB/backup identities were migrated to orot on 2026-09-12; retain rollback archives.
 - `source_id` values are lowercase ASCII slugs: `gimbab`, `secondtrack`, `poclanos`.
 - Database and JSON fields are `snake_case`. The current web client manually types the API subset it uses in `apps/web/lib/api.ts`. Keep those types aligned with API schemas; no Swift client exists yet.
 - Fields suffixed `_raw` hold source text verbatim. **Never normalize in place;** normalized values live in `_norm` fields.
@@ -191,7 +191,7 @@ that host services are currently running. See [runtime review](docs/runtime-revi
   Release dates use KST midnight. Tags are `release-<id>-<event_type>`.
 - **T-116 완료:** 재시도 3회(1·5분), 404/410 시 구독 자동 비활성화, 그리고
   **Slack 운영자 알림**. 배송은 여전히 크래시 전후로 exactly-once 가 아니다.
-- **Tests:** Python pytest + Ruff + core mypy; web Node tests + ESLint + Next build. Optional
+- **Tests:** Python pytest + Ruff + source/test mypy + core strict; web Node tests + ESLint + Next build. Optional
   `apps/api/tests/integration_runtime.py` creates its own PostgreSQL schema and rolls it back,
   using a fake sender. T-012 `.github/workflows/ci.yml` runs Python checks, disposable PostgreSQL
   migration/integration checks, and web checks on PR/main push/manual dispatch. No testcontainers
