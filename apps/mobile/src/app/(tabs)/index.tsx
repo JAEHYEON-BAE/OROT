@@ -1,13 +1,14 @@
+import { ThemeText as Text } from "@/components/theme-text";
 import { useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Link } from "expo-router";
 import { RecordArt } from "@/components/record-art";
-import { formatPreorder, formatReleaseDate } from "@/features/releases/display";
+import { formatSchedule } from "@/features/releases/display";
 import { getFeed, type FeedSort } from "@/lib/api/client";
 import { useResource } from "@/lib/api/use-resource";
 import { RequestState } from "@/components/request-state";
-import { usePalette } from "@/lib/theme";
+import { theme, usePalette } from "@/lib/theme";
 
 export default function FeedScreen() {
   const colors = usePalette();
@@ -20,10 +21,16 @@ export default function FeedScreen() {
     >
       <FlatList
         contentContainerStyle={styles.content}
-        data={feed.data?.items.map(item => item.release) ?? []}
+        data={feed.data?.items.map((item) => item.release) ?? []}
         refreshing={feed.loading && !!feed.data}
         onRefresh={feed.refresh}
-        ListEmptyComponent={<RequestState loading={feed.loading} error={feed.error} retry={feed.refresh} />}
+        ListEmptyComponent={
+          <RequestState
+            loading={feed.loading}
+            error={feed.error}
+            retry={feed.refresh}
+          />
+        }
         keyExtractor={(item) => String(item.id)}
         ListHeaderComponent={
           <View>
@@ -43,7 +50,7 @@ export default function FeedScreen() {
               새로운 음반과 예약 일정을 한곳에서 만나세요.
             </Text>
             <View style={[styles.notice, { backgroundColor: colors.tint }]}>
-              <Text style={{ color: colors.accent, fontSize: 13 }}>
+              <Text style={[theme.typography.label, { color: colors.accent }]}>
                 OROT의 최신 공개 일정 · 한국 시간 기준
               </Text>
             </View>
@@ -66,7 +73,7 @@ export default function FeedScreen() {
                   <Text
                     style={{
                       color: sort === value ? colors.background : colors.text,
-                      fontWeight: "600",
+                      ...theme.typography.button,
                     }}
                   >
                     {value === "imminent" ? "발매 임박순" : "최근 변경순"}
@@ -89,7 +96,7 @@ export default function FeedScreen() {
                 { backgroundColor: colors.surface, borderColor: colors.border },
               ])}
             >
-              <RecordArt color="#516D64" />
+              <RecordArt uri={item.cover_url} />
               <View style={styles.cardText}>
                 <Text style={[styles.artist, { color: colors.secondary }]}>
                   {item.artist_name ?? "아티스트 미정"}
@@ -101,7 +108,7 @@ export default function FeedScreen() {
                   {item.variant ?? item.format ?? "판본 정보 미정"}
                 </Text>
                 <Text style={[styles.time, { color: colors.accent }]}>
-                  {item.preorder_opens_at ? formatPreorder(item.preorder_opens_at) : formatReleaseDate(item.release_date)}
+                  {formatSchedule(item)}
                 </Text>
               </View>
             </Pressable>
@@ -117,45 +124,53 @@ export default function FeedScreen() {
   );
 }
 const styles = StyleSheet.create({
-  content: { padding: 22, paddingBottom: 30 },
+  content: { padding: theme.layout.feedPadding, paddingBottom: 30 },
   brandRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 8,
+    gap: theme.spacing.sm,
     marginBottom: 30,
   },
-  brand: { fontSize: 27, fontWeight: "800", letterSpacing: 4 },
-  eyebrow: { fontSize: 12 },
+  brand: theme.typography.brand,
+  eyebrow: theme.typography.caption,
   heading: {
-    fontSize: 32,
-    lineHeight: 43,
-    fontWeight: "700",
-    marginBottom: 12,
+    ...theme.typography.hero,
+    marginBottom: theme.spacing.md,
   },
-  intro: { fontSize: 14, lineHeight: 23 },
-  notice: { padding: 12, borderRadius: 10, marginTop: 22, marginBottom: 22 },
-  filters: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 18 },
+  intro: theme.typography.intro,
+  notice: {
+    padding: theme.spacing.md,
+    borderRadius: theme.radius.notice,
+    marginTop: 22,
+    marginBottom: 22,
+  },
+  filters: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: theme.spacing.sm,
+    marginBottom: 18,
+  },
   filter: {
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.spacing.lg,
     paddingVertical: 13,
-    borderRadius: 24,
+    borderRadius: theme.radius.pill,
     borderWidth: 1,
   },
   card: {
     flexDirection: "row",
     alignItems: "center",
     padding: 15,
-    borderRadius: 16,
+    borderRadius: theme.radius.card,
     borderWidth: 1,
     gap: 14,
-    marginBottom: 12,
+    marginBottom: theme.spacing.md,
   },
   cardText: { flex: 1, gap: 5 },
-  artist: { fontSize: 12 },
-  title: { fontSize: 18, fontWeight: "700" },
-  variant: { fontSize: 12 },
-  time: { fontSize: 12, fontWeight: "600", marginTop: 4 },
-  footer: { textAlign: "center", fontSize: 12, marginTop: 18 },
+  artist: theme.typography.caption,
+  title: theme.typography.cardTitle,
+  variant: theme.typography.caption,
+  time: { ...theme.typography.captionStrong, marginTop: theme.spacing.xs },
+  footer: { ...theme.typography.caption, textAlign: "center", marginTop: 18 },
 });

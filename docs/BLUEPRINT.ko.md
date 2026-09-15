@@ -312,6 +312,9 @@ CREATE TABLE releases (
     -- ── 일정 알림용 (ADR-0005) ────────────────────────────────
     preorder_opens_at  TIMESTAMPTZ,         -- 예약 시작. 알림 트리거
     preorder_closes_at TIMESTAMPTZ,         -- 예약 마감. 수동 등록만 채울 수 있음
+    schedule_status TEXT NOT NULL DEFAULT 'SCHEDULED'
+                    CHECK (schedule_status IN ('SCHEDULED','TBA','ON_SALE')),
+    until_sold_out BOOLEAN NOT NULL DEFAULT FALSE,
     curation        TEXT NOT NULL DEFAULT 'MANUAL'
                     CHECK (curation IN ('MANUAL','CRAWLED')),
     is_published    BOOLEAN NOT NULL DEFAULT FALSE,  -- 초안은 공개 API 에 노출 안 함
@@ -618,7 +621,7 @@ PENDING을 FAILED 재시도보다 먼저, 배송 생성 시각/ID 오름차순�
 
 FastAPI 기본 문서 `/docs`, `/redoc`, `/openapi.json`은 API 포트에서 제공한다.
 검색·아티스트·이벤트 스트림·소스 목록·워치리스트·계정·APNs 기기·`/metrics` 라우터는 **미구현**이다.
-Funnel 웹 도메인은 모든 API 경로를 공개하지 않는다. 푸시는 `/api/push/*`, RSS/ICS는 같은 `/v1/*` 경로로만 중계한다.
+Funnel 웹 도메인은 푸시 `/api/push/*`, RSS/ICS의 고정 `/v1/*` 경로, 모바일 GET `/api/mobile/v1/feed`, `/api/mobile/v1/releases`, `/api/mobile/v1/releases/{id}`만 중계한다. 모바일 쓰기·관리자·임의 경로 프록시는 제공하지 않는다.
 
 ### 5.2-1 운영자 API
 
@@ -638,6 +641,18 @@ Funnel 웹 도메인은 모든 API 경로를 공개하지 않는다. 푸시는 `
 `can_delete`는 비공개이고 연결된 listings가 없을 때 true다. 다른 FK 참조가 있으면 실제 삭제는 409일 수 있다.
 공개 API에는 notes가 없고 비공개 상세는 404다. 입력에서 공백/null 제목, null is_limited,
 타임존 없는 시각, 잘못된 예약 창·URL·원화 범위를 거부한다.
+
+### 일정 상태 토글 (2026-09-14, T-109 개선)
+
+- `schedule_status`: `SCHEDULED`(날짜 직접 입력, 기존 행 기본값), `TBA`(발매일 미정), `ON_SALE`(판매 중).
+- `TBA`는 시작·종료·발매일을 null로, `until_sold_out`을 false로 저장한다. 폼에서 해당 날짜와 종료 토글을 비활성화한다.
+- `ON_SALE`은 시작 날짜만 null로 저장한다. 종료 날짜와 별도 발매일은 선택할 수 있다. ‘미정’과 ‘판매 중’은 상호 배타적이다.
+- `until_sold_out=true`는 종료 날짜를 null로 저장한다. 매진 자동 감지나 재고 추적을 뜻하지 않는다.
+- 비활성 입력은 저장하지 않는다. 저장 전 토글을 해제하면 입력하던 값이 다시 활성화되며, 저장 후 다시 편집하면 저장된 상태를 복원한다.
+- POST와 PATCH 모두 동일한 상태 규칙을 적용한다. PATCH는 기존 값과 병합 후 정규화하며, 생략한 상태를 초기화하지 않는다. DB CHECK 제약도 모순된 상태를 거부한다.
+- 상태·종료 조건 변경도 `SCHEDULE_CHANGED`에 기록한다. 날짜 제거로 영향을 받는 이전 예약·발매 이벤트는 기존 규칙으로 무효화한다. 가상의 시작 시각을 만들지 않는다.
+- 공개 API와 웹·모바일은 상태를 전달·표시한다. 종료 날짜가 지난 `ON_SALE`은 ‘판매 종료’로 표시한다. 실제 시각 없는 상태에 캘린더 날짜를 만들어 넣지 않는다.
+- [운영자 토글 검증](admin-schedule-modes.ko.md), [UI 실시간 수정 안내](UI_DEVELOPMENT.ko.md).
 
 ### 5.2-2 실행 시 보장 사항 (2026-09-10 점검)
 
@@ -733,7 +748,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**현재 모바일 경로**: `apps/mobile/` (mock 앱; native `ios/`·`android/`는 생성 파일).
+**현재 모바일 경로**: `apps/mobile/` (실제 공개 API 연결 앱; native `ios/`·`android/`는 생성 파일).
 
 **계획 경로**: `apps/api/src/orot_api/services/`, collector의 `pipeline.py`,
 core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·아티스트·워치리스트,
@@ -765,8 +780,8 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 ### 7.3 API 클라이언트와 환경 변수
 
 `apps/web/lib/api.ts`는 서버용 fetch 도우미와 **수기 TypeScript 타입**이다.
-생성 클라이언트·`api-types.ts`·openapi-typescript는 없으며 생성 도입은 향후 작업이다.
-`make openapi`는 API 계약 스냅샷만 생성한다.
+웹의 생성 클라이언트는 없다. 모바일은 `npm run generate:api`로 openapi-typescript 타입을 생성하며 HTTP 호출과 응답 검증은 직접 구현한다.
+`make openapi`는 API 계약 스냅샷을 생성한다.
 
 - `API_BASE_URL`: 웹 서버가 사용하는 내부 API 주소 (Compose에서는 `http://api:8000`).
 - `PUBLIC_WEB_URL`: api·collector·web이 링크를 만들 때 사용하는 브라우저 접근 가능한 공개 웹 주소.
@@ -778,7 +793,7 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 
 ## 8. 모바일 애플리케이션 — Expo 뼈대와 후속 계획
 
-> 2026-09-13 사용자 선택: React Native + Expo + TypeScript, iOS 우선 및 Android 확장 가능 구조. 기존 SwiftUI·SwiftData·Swift 클라이언트 계획을 대체한다. T-033 첫 단계의 mock 앱 뼈대가 구현되었다. 실제 API·푸시·배포는 후속이다.
+> 2026-09-13 사용자 선택: React Native + Expo + TypeScript, iOS 우선 및 Android 확장 가능 구조. 기존 SwiftUI·SwiftData·Swift 클라이언트 계획을 대체한다. T-033 앱 뼈대와 실제 공개 읽기 API 연결이 구현되었다. 모바일 푸시·스토어 배포는 후속이다.
 
 ### 8.1 범위와 상세 명세
 
@@ -786,7 +801,7 @@ core의 `normalize.py`·`resolver.py`·`events.py`·`aliases.yaml`, 웹 검색·
 
 ### 8.2 앱과 서버 연결
 
-`apps/mobile/`에 SDK 55·TypeScript strict·Router 기반 mock 피드/상세/설정과 테스트가 있다. [첫 단계 검증](mobile-validation/T-033-scaffold.ko.md)을 참고한다. 기존 Python API를 신규 고정 `/api/mobile/v1/*` 웹 프록시로 연결한다. Mac mini + Funnel, API/DB loopback을 유지한다. React Native 화면은 새로 구현하고 서버는 재사용한다. Expo 지원 버전 조합과 development build로 시작해 TestFlight로 검증한다. Metro는 개발 전용이며 Funnel과 별개다.
+`apps/mobile/`에 SDK 55·TypeScript strict·Router 기반 실제 API 피드/상세/설정과 fixture 테스트가 있다. [첫 단계 검증](mobile-validation/T-033-live-api.ko.md)을 참고한다. 기존 Python API를 고정 `/api/mobile/v1/feed`, `/api/mobile/v1/releases`, `/api/mobile/v1/releases/{id}` 읽기 프록시로 연결한다. Mac mini + Funnel, API/DB loopback을 유지한다. React Native 화면은 새로 구현하고 서버는 재사용한다. Expo 지원 버전 조합과 development build로 시작해 TestFlight로 검증한다. Metro는 개발 전용이며 Funnel과 별개다.
 
 ### 8.3 알림과 진행 순서
 
@@ -1038,6 +1053,8 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-032 | 웹 워치리스트 화면 | 로그인 후 CRUD 동작 |
 
 ### M5 — 모바일 앱 (Expo, iOS 우선; T-033 첫 단계 구현)
+
+T-034 공통 테마(`apps/mobile/theme.ts`)와 테마 텍스트 컴포넌트를 구현했다. 팔레트·글꼴·이미지·간격을 목록/상세/설정/내비게이션에서 공유한다. 사용자 지정 폰트와 VoiceOver·큰 글자의 실기기 검증은 후속이며 T-034 전체 완료는 아니다. [테마 편집 안내](../apps/mobile/THEME.md).
 
 | ID | 작업 | 완료 조건 |
 |---|---|---|

@@ -308,6 +308,9 @@ CREATE TABLE releases (
     -- ── schedule notification fields (ADR-0005) ───────────────
     preorder_opens_at  TIMESTAMPTZ,        -- notification trigger
     preorder_closes_at TIMESTAMPTZ,        -- only manual entry can fill this
+    schedule_status TEXT NOT NULL DEFAULT 'SCHEDULED'
+                    CHECK (schedule_status IN ('SCHEDULED','TBA','ON_SALE')),
+    until_sold_out BOOLEAN NOT NULL DEFAULT FALSE,
     curation          TEXT NOT NULL DEFAULT 'MANUAL'
                       CHECK (curation IN ('MANUAL','CRAWLED')),
     is_published      BOOLEAN NOT NULL DEFAULT FALSE,  -- drafts stay out of public API
@@ -614,7 +617,7 @@ the schedule was still added, whatever its times became.
 
 FastAPI also provides `/docs`, `/redoc` and `/openapi.json` on the API port. Search, artist detail,
 event streams, source lists, watchlists, accounts, APNs device registration and `/metrics` are **not implemented**.
-Funnel does not expose every API path: push is proxied through `/api/push/*`, and RSS/ICS through their fixed `/v1/*` paths.
+Funnel proxies push through `/api/push/*`, RSS/ICS through fixed `/v1/*` paths, and mobile GET reads through `/api/mobile/v1/feed`, `/api/mobile/v1/releases` and `/api/mobile/v1/releases/{id}`. It provides no mobile writes, admin or arbitrary-path proxy.
 
 ### 5.2-1 Operator API
 
@@ -634,6 +637,18 @@ Funnel does not expose every API path: push is proxied through `/api/push/*`, an
 `can_delete` is true for unpublished releases without linked listings; other FK references may still cause a 409.
 Public output excludes notes and returns 404 for unpublished details. Inputs reject blank/null titles,
 null is_limited, naive timestamps, invalid preorder windows/URLs and invalid won prices.
+
+### Schedule toggles (2026-09-14, T-109 enhancement)
+
+- `schedule_status`: `SCHEDULED` (manual dates, default for existing rows), `TBA` (date undecided), `ON_SALE` (already selling).
+- `TBA` clears opening, closing and release dates and resets `until_sold_out` to false; the form disables these inputs.
+- `ON_SALE` clears only opening time; closing time and a separate release date remain optional. TBA and ON_SALE are mutually exclusive.
+- `until_sold_out=true` clears closing time. This does not detect sold-out inventory automatically.
+- Disabled inputs are excluded from storage. Toggling back before saving restores the entered values; editing after saving restores the persisted mode.
+- POST and PATCH use the same normalization; PATCH merges stored values first and preserves omitted modes. Database CHECK constraints also reject conflicting states.
+- Mode and ending-condition changes produce `SCHEDULE_CHANGED`; cleared dates supersede their existing time-driven events. No artificial opening timestamp is created.
+- Public API, web and mobile carry/display these modes. ON_SALE becomes “판매 종료” after its explicit deadline. Undated modes do not create artificial calendar entries.
+- [Admin validation](admin-schedule-modes.ko.md), [Live UI editing guide](UI_DEVELOPMENT.ko.md).
 
 ### 5.2-2 Runtime guarantees (2026-09-10 review)
 
@@ -729,7 +744,7 @@ backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
 
-**Current mobile path:** `apps/mobile/` (mock app; native `ios/` and `android/` are generated).
+**Current mobile path:** `apps/mobile/` (live public API app; native `ios/` and `android/` are generated).
 
 **Reserved future paths:** `apps/api/src/orot_api/services/`, collector `pipeline.py`,
 core `normalize.py`/`resolver.py`/`events.py`/`aliases.yaml`, web search/artist/watchlist routes,
@@ -761,8 +776,8 @@ Search, artist and watchlist screens are absent. The API accepts cover_url, but 
 ### 7.3 API Client and Environment
 
 `apps/web/lib/api.ts` contains server-side fetch helpers and **handwritten TypeScript types**.
-There is no generated client, api-types.ts or openapi-typescript dependency. Generation remains future work;
-`make openapi` currently generates only the API contract snapshot.
+The web has no generated client. Mobile generates openapi-typescript types with `npm run generate:api`; HTTP calls and runtime validation remain handwritten.
+`make openapi` generates the API contract snapshot.
 
 - `API_BASE_URL` is the web server's internal API address (`http://api:8000` in Compose).
 - `PUBLIC_WEB_URL` is the browser-accessible public web address used for links by api, collector and web.
@@ -774,7 +789,7 @@ There is no generated client, api-types.ts or openapi-typescript dependency. Gen
 
 ## 8. Mobile Application — Expo Scaffold and Remaining Plan
 
-> Updated 2026-09-13: the owner selected React Native + Expo + TypeScript, iOS first, with Android portability. This supersedes the previous SwiftUI/SwiftData/Swift client plan. The T-033 first-step mock scaffold is implemented; live API, push and distribution remain pending.
+> Updated 2026-09-13: the owner selected React Native + Expo + TypeScript, iOS first, with Android portability. This supersedes the previous SwiftUI/SwiftData/Swift client plan. T-033 scaffold and public read API integration are implemented; mobile push and store distribution remain pending.
 
 ### 8.1 Scope and source of truth
 
@@ -782,7 +797,7 @@ Follow the detailed [mobile blueprint](MOBILE_BLUEPRINT.ko.md) for architecture,
 
 ### 8.2 Architecture and app
 
-`apps/mobile/` now contains an SDK 55 TypeScript-strict Router scaffold with mock feed/detail/settings and tests. See the [first-step validation](mobile-validation/T-033-scaffold.ko.md). Reuse Python APIs through explicit `/api/mobile/v1/*` web proxies to be implemented; preserve Mac mini + Funnel and loopback API/DB ports. React Native screens replace web DOM UI, not the backend. Use Expo-supported dependency versions and an iOS development build, then TestFlight. Metro is development-only and separate from Funnel.
+`apps/mobile/` now contains an SDK 55 TypeScript-strict Router scaffold with live feed/detail/settings and fixture tests. See the [first-step validation](mobile-validation/T-033-live-api.ko.md). Reuse Python APIs through explicit read-only `/api/mobile/v1/feed`, `/api/mobile/v1/releases` and `/api/mobile/v1/releases/{id}` web proxies; preserve Mac mini + Funnel and loopback API/DB ports. React Native screens replace web DOM UI, not the backend. Use Expo-supported dependency versions and an iOS development build, then TestFlight. Metro is development-only and separate from Funnel.
 
 ### 8.3 Notifications and sequencing
 
@@ -1036,6 +1051,8 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-032 | Web watchlist screen | CRUD works after login |
 
 ### M5 — Mobile App (Expo, iOS First; T-033 First Step Implemented)
+
+T-034 now centralizes colors, fonts, images and spacing in `apps/mobile/theme.ts`, with themed text across feed/detail/settings/navigation. Custom-font rendering, VoiceOver and large-text checks on devices remain pending; T-034 is not fully complete. [Theme editing guide](../apps/mobile/THEME.md).
 
 | ID | Task | Acceptance criteria |
 |---|---|---|

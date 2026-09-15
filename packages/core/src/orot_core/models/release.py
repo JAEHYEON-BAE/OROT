@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy import (
     BigInteger,
@@ -33,6 +34,20 @@ class Release(Base):
     __tablename__ = "releases"
     __table_args__ = (
         CheckConstraint("curation IN ('MANUAL','CRAWLED')", name="curation_valid"),
+        CheckConstraint(
+            "schedule_status IN ('SCHEDULED','TBA','ON_SALE')", name="schedule_status_valid"
+        ),
+        CheckConstraint(
+            "schedule_status != 'TBA' OR (preorder_opens_at IS NULL "
+            "AND preorder_closes_at IS NULL AND release_date IS NULL AND NOT until_sold_out)",
+            name="tba_dates_empty",
+        ),
+        CheckConstraint(
+            "schedule_status != 'ON_SALE' OR preorder_opens_at IS NULL", name="on_sale_start_empty"
+        ),
+        CheckConstraint(
+            "NOT until_sold_out OR preorder_closes_at IS NULL", name="until_sold_out_end_empty"
+        ),
         # barcode 는 최우선 병합 키(§4.4 S1). NULL 은 중복을 허용해야 하므로 부분 유니크.
         Index(
             "uq_releases_barcode",
@@ -67,6 +82,10 @@ class Release(Base):
     preorder_opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # 예약 마감. 어느 소스도 노출하지 않아 **수동 등록만 채울 수 있다** (ADR-0005 §3).
     preorder_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    schedule_status: Mapped[Literal["SCHEDULED", "TBA", "ON_SALE"]] = mapped_column(
+        Text, nullable=False, server_default="SCHEDULED"
+    )
+    until_sold_out: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     curation: Mapped[Curation] = mapped_column(Text, nullable=False, server_default="MANUAL")
     # 초안은 공개 API 에 노출하지 않는다 — 새어 나가면 미공지 발매가 유출된다.
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

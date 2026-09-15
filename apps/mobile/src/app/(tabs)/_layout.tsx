@@ -1,6 +1,6 @@
+import { ThemeText as Text } from "@/components/theme-text";
 import { Tabs } from "expo-router";
-import { Text } from "react-native";
-import { usePalette } from "@/lib/theme";
+import { theme, usePalette } from "@/lib/theme";
 
 export default function TabsLayout() {
   const colors = usePalette();
@@ -8,6 +8,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarLabelStyle: theme.typography.caption,
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.secondary,
         tabBarStyle: {
@@ -21,7 +22,9 @@ export default function TabsLayout() {
         options={{
           title: "발매 일정",
           tabBarIcon: ({ color }) => (
-            <Text style={{ color, fontSize: 22 }}>◉</Text>
+            <Text variant="tabIcon" style={{ color }}>
+              {theme.icons.feed}
+            </Text>
           ),
         }}
       />
@@ -30,7 +33,9 @@ export default function TabsLayout() {
         options={{
           title: "설정",
           tabBarIcon: ({ color }) => (
-            <Text style={{ color, fontSize: 22 }}>☷</Text>
+            <Text variant="tabIcon" style={{ color }}>
+              {theme.icons.settings}
+            </Text>
           ),
         }}
       />

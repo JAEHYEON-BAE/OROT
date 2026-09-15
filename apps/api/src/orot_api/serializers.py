@@ -23,6 +23,8 @@ async def release_to_out(session: AsyncSession, release: Release) -> ReleaseOut:
         format=release.format,
         variant=release.variant,
         is_limited=release.is_limited,
+        schedule_status=release.schedule_status or "SCHEDULED",
+        until_sold_out=release.until_sold_out or False,
         release_date=release.release_date,
         preorder_opens_at=release.preorder_opens_at,
         preorder_closes_at=release.preorder_closes_at,

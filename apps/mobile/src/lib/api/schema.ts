@@ -489,6 +489,17 @@ export interface components {
             variant?: string | null;
             /** Is Limited */
             is_limited: boolean;
+            /**
+             * Schedule Status
+             * @default SCHEDULED
+             * @enum {string}
+             */
+            schedule_status: "SCHEDULED" | "TBA" | "ON_SALE";
+            /**
+             * Until Sold Out
+             * @default false
+             */
+            until_sold_out: boolean;
             /** Release Date */
             release_date?: string | null;
             /** Preorder Opens At */
@@ -519,6 +530,23 @@ export interface components {
          *     **알림의 트리거는 `preorder_opens_at`** 이다.
          */
         ReleaseIn: {
+            /**
+             * Schedule Status
+             * @default SCHEDULED
+             * @enum {string}
+             */
+            schedule_status: "SCHEDULED" | "TBA" | "ON_SALE";
+            /**
+             * Until Sold Out
+             * @default false
+             */
+            until_sold_out: boolean;
+            /** Release Date */
+            release_date?: string | null;
+            /** Preorder Opens At */
+            preorder_opens_at?: string | null;
+            /** Preorder Closes At */
+            preorder_closes_at?: string | null;
             /** Title */
             title: string;
             /** Artist Name */
@@ -534,12 +562,6 @@ export interface components {
              * @default false
              */
             is_limited: boolean;
-            /** Release Date */
-            release_date?: string | null;
-            /** Preorder Opens At */
-            preorder_opens_at?: string | null;
-            /** Preorder Closes At */
-            preorder_closes_at?: string | null;
             /** Cover Url */
             cover_url?: string | null;
             /** Notes */
@@ -600,6 +622,17 @@ export interface components {
             variant?: string | null;
             /** Is Limited */
             is_limited: boolean;
+            /**
+             * Schedule Status
+             * @default SCHEDULED
+             * @enum {string}
+             */
+            schedule_status: "SCHEDULED" | "TBA" | "ON_SALE";
+            /**
+             * Until Sold Out
+             * @default false
+             */
+            until_sold_out: boolean;
             /** Release Date */
             release_date?: string | null;
             /** Preorder Opens At */
@@ -632,6 +665,10 @@ export interface components {
          * @description 부분 수정. 보낸 필드만 바뀐다.
          */
         ReleaseUpdate: {
+            /** Schedule Status */
+            schedule_status?: ("SCHEDULED" | "TBA" | "ON_SALE") | null;
+            /** Until Sold Out */
+            until_sold_out?: boolean | null;
             /** Title */
             title?: string | null;
             /** Artist Name */

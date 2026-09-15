@@ -4,6 +4,13 @@ import type { Release } from "./api";
 export function feedDisplay(release: Release, now: number) {
   const opens = release.preorder_opens_at;
   const closes = release.preorder_closes_at;
+  if (release.schedule_status === "TBA") {
+    return { status: "발매일 미정", at: null, dateOnly: false, label: "발매일 미정", future: false };
+  }
+  if (release.schedule_status === "ON_SALE") {
+    const status = closes && now >= Date.parse(closes) ? "판매 종료" : "판매 중";
+    return { status, at: null, dateOnly: false, label: status, future: false };
+  }
   if (opens) {
     const start = Date.parse(opens);
     const status = now < start

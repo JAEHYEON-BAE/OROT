@@ -2,6 +2,8 @@
 
 검증일: 2026-09-13. 범위는 환경 확인·mock 앱·로컬 Simulator 빌드다. T-033 전체 완료가 아니다.
 
+> 후속 실제 API 연결·배포 결과는 [연결 검증](T-033-live-api.ko.md)을 참고한다. 아래는 연결 전 단계의 기록이다.
+
 ## 구현
 
 - `apps/mobile`에 Expo Router, React Native, TypeScript strict 기반 앱 추가.

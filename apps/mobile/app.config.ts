@@ -1,9 +1,10 @@
 import type { ExpoConfig } from "expo/config";
+import { theme } from "./theme.ts";
 
-// This first milestone contains demonstration data only. Prevent store builds.
+// Store signing and mobile push are not configured yet. Prevent accidental distribution.
 if (process.env.EAS_BUILD_PROFILE === "production") {
   throw new Error(
-    "T-033 mock scaffold is not ready for production distribution.",
+    "OROT development app is not ready for production distribution.",
   );
 }
 
@@ -14,12 +15,26 @@ const config: ExpoConfig = {
   scheme: "orot-dev",
   orientation: "portrait",
   userInterfaceStyle: "automatic",
-  icon: "./assets/icon.png",
+  icon: theme.images.appIcon,
   ios: { bundleIdentifier: "com.orot.mobile.dev", supportsTablet: false },
   android: { package: "com.orot.mobile.dev" },
   plugins: [
     "expo-router",
-    ["expo-splash-screen", { backgroundColor: "#F7F4ED" }],
+    [
+      "expo-splash-screen",
+      {
+        backgroundColor: theme.colors.light.background,
+        dark: { backgroundColor: theme.colors.dark.background },
+      },
+    ],
+    ...(theme.fonts.files.length
+      ? [
+          ["expo-font", { fonts: theme.fonts.files }] as [
+            string,
+            { fonts: string[] },
+          ],
+        ]
+      : []),
   ],
   experiments: { typedRoutes: true },
 };

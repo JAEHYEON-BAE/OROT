@@ -33,7 +33,7 @@ owner-approved prelaunch change. Keep them stable. Active DB/backup identities w
 - `apps/web/`: Next.js App Router, React, TypeScript, Tailwind CSS, and service
   worker. Follow its nested `AGENTS.md`; read the relevant installed Next.js
   guide under `apps/web/node_modules/next/dist/docs/` before writing web code.
-- `apps/mobile/`: Expo SDK 55 + TypeScript mock scaffold. Follow its nested
+- `apps/mobile/`: Expo SDK 55 + TypeScript app connected to public read APIs. Follow its nested
   `AGENTS.md`; use Node 22 and keep generated native projects out of Git.
 - Each Python package has a `tests/` directory. Saved source HTML belongs in
   `apps/collector/tests/fixtures/<source_id>/`.
@@ -93,7 +93,8 @@ or rebuilding services. Python/web test suites are required for implementation c
   RSS/ICS use fixed `app/v1/*` proxies. Server API access uses `API_BASE_URL`;
   public links use `PUBLIC_WEB_URL` in api, collector and web (ADR-0007).
 - Web API types in `apps/web/lib/api.ts` are handwritten today. OpenAPI is a
-  generated snapshot, not an installed TypeScript/Swift client generation pipeline.
+  generated snapshot; mobile generates TypeScript types with `npm run generate:api`
+  in `apps/mobile`, while its HTTP client and runtime validation are handwritten.
 - `make prod` builds the web without source mounts. API still reloads mounted
   Python source; collector requires restart after source edits. Environment
   changes require container recreation, not only restart.

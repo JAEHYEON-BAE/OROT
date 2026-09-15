@@ -1,10 +1,10 @@
 # OROT — 모바일 앱 개발 블루프린트
 
-> 작성: 2026-09-13 · 버전 0.2.0 · 상태: T-033 첫 단계 mock 뼈대 구현, 나머지는 계획
+> 작성: 2026-09-13 · 버전 0.2.0 · 상태: T-033 실제 공개 API 연결 구현, 푸시·배포 등은 후속
 > 선택된 방향: React Native + Expo + TypeScript, iOS 우선, Android 확장 가능 구조.
 > 서버: 기존 Mac mini + Docker Compose + Tailscale Funnel 유지.
 > 검증 기기: 사용자의 iPhone 14와 Mac mini의 iOS Simulator.
-> 첫 단계 현황은 [검증 기록](mobile-validation/T-033-scaffold.ko.md)을 따른다. `apps/mobile` mock 앱·로컬 빌드·테스트 기반이 추가되었고, 실제 API·모바일 푸시·TestFlight는 미구현이다. 아래 전체 설계가 완료되었다는 뜻은 아니다.
+> 최신 현황은 [실제 연결 검증](mobile-validation/T-033-live-api.ko.md)을 따른다. `apps/mobile`은 실제 공개 API를 사용하며 Funnel 배포와 Simulator 표시까지 확인했다. 모바일 푸시·TestFlight는 미구현이다. 아래 전체 설계가 완료되었다는 뜻은 아니다.
 
 [기존 한국어 명세](BLUEPRINT.ko.md) · [English blueprint](BLUEPRINT.en.md) · [도메인과 모바일 호스팅](MOBILE_APP_DOMAIN_AND_HOSTING.ko.md) · [모바일 결정 기록](adr/0009-expo-mobile-app.md)
 
@@ -73,12 +73,12 @@
 | 영역 | 현재 | 모바일에서 필요한 변화 |
 |---|---|---|
 | 서버 | FastAPI + PostgreSQL + collector | 공통 사용 |
-| 공개 진입점 | Funnel → loopback 3000 → Next.js | 허용한 JSON 경로만 추가 |
-| JSON API | 내부 `/v1/feed`, `/v1/releases`, `/v1/releases/{id}` | 공개 프록시·계약 검증 |
-| 공개 프록시 | `/api/push/*`, RSS/ICS의 고정 경로 | 네이티브 기기용 경로 별도 구현 |
+| 공개 진입점 | Funnel → loopback 3000 → Next.js | 기존 구조 유지 |
+| JSON API | 내부 `/v1/feed`, `/v1/releases`, `/v1/releases/{id}`와 고정 모바일 GET 프록시 | 읽기 연결 구현·검증 완료 |
+| 공개 프록시 | `/api/push/*`, RSS/ICS, `/api/mobile/v1/`의 고정 GET 3종 | 네이티브 기기 등록용 경로는 후속 |
 | 알림 | WEB 대상 선택, WebPushSender, 60초 tick | 모바일 대상 선택·sender·receipt 처리 |
 | 기기 스키마 | `platform` CHECK는 IOS/WEB만 허용 | Android와 제공자/환경 구분 마이그레이션 |
-| 앱 | `apps/mobile` mock 피드/상세/설정 뼈대 추가 | 실제 API·푸시·배포 후속 |
+| 앱 | `apps/mobile` 실제 API 피드/상세/설정 | 실기기·푸시·스토어 배포 후속 |
 | 계정/워치리스트 | 일부 테이블만 존재, 제품 기능은 후속 | 최초 버전의 의존성으로 두지 않음 |
 
 근거: `apps/api/src/orot_api/routers/{feed,releases,push}.py`, `apps/web/lib/proxy.ts`, `packages/core/src/orot_core/{notifications,enums}.py`, `packages/core/src/orot_core/models/user.py`.
@@ -124,7 +124,7 @@ Metro는 개발 중 JavaScript를 전달한다. Funnel은 서비스 API를 전�
 
 ### 3.1 API 주소
 
-모바일의 공개 기본 주소는 `https://<현재-Funnel-호스트>/api/mobile`로 계획한다. 아래 경로는 아직 없다. `tailscale funnel status`에서 확인한 주소를 사용하고 과거 문서의 호스트명을 무조건 복사하지 않는다.
+모바일의 공개 기본 주소는 `https://<현재-Funnel-호스트>/api/mobile`로 계획한다. 아래 GET 경로 3개는 구현되었다. 기기 쓰기 경로는 아직 없다. `tailscale funnel status`에서 확인한 주소를 사용하고 과거 문서의 호스트명을 무조건 복사하지 않는다.
 
 | 앱 요청 | 프록시가 호출할 내부 경로 | 허용 메서드 |
 |---|---|---|
@@ -241,7 +241,7 @@ DB 잠금/unique 제약만으로 외부 전송과 DB 커밋을 원자화할 수 
 
 ## 6. 저장소 구조
 
-아래는 목표 구조다. `apps/mobile`과 mock 피드/상세/설정·tests는 생성되었고, features/notifications·lib/api·storage·e2e·eas.json은 후속이다. 앱 루트의 package-lock으로 독립 설치하며 초기에 저장소 전체를 npm workspace로 개편하지 않는다.
+아래는 목표 구조다. `apps/mobile`의 실제 API 피드/상세/설정·tests·lib/api는 구현되었고, features/notifications·storage·e2e·eas.json은 후속이다. 앱 루트의 package-lock으로 독립 설치하며 초기에 저장소 전체를 npm workspace로 개편하지 않는다.
 
 ```text
 apps/mobile/
@@ -340,7 +340,7 @@ npx expo install --check
 
 기본 TypeScript·Router 템플릿을 확인한다. 이름 OROT, slug orot, scheme orot을 설정한다. bundleIdentifier와 Android package는 본인이 관리하는 고유 reverse-DNS 식별자로 결정한다. 예: `com.<owner>.orot`의 `<owner>`를 실제 고유 값으로 교체한다. 이는 도메인 구입 증명이 필요한 주소가 아니다. production 식별자는 스토어 등록 이후 임의 변경하지 않는다.
 
-T-033에서 lint/typecheck/test/type-generation 스크립트를 정의하고 최소 mock 피드 화면을 만든다. 아래 스크립트들은 새 앱에서 설정할 계약이며 현재 저장소에 존재하는 명령이 아니다.
+T-033의 lint/typecheck/test/generate:api/check 스크립트와 실제 API 화면이 구현되었다. 아래는 기본 명령 예시이며 정확한 현재 명령은 `apps/mobile/package.json`과 README를 따른다.
 
 ```json
 {
@@ -355,7 +355,7 @@ T-033에서 lint/typecheck/test/type-generation 스크립트를 정의하고 최
 }
 ```
 
-jest-expo와 React Native Testing Library 및 필요한 타입을 SDK 호환 버전으로 추가하고 jest preset을 설정해야 test 명령이 동작한다. [프로젝트 생성](https://docs.expo.dev/get-started/create-a-project/), [Expo 단위 테스트](https://docs.expo.dev/develop/unit-testing/)
+jest-expo와 React Native Testing Library 및 필요한 타입, jest preset은 SDK 호환 버전으로 설정되어 있다. [프로젝트 생성](https://docs.expo.dev/get-started/create-a-project/), [Expo 단위 테스트](https://docs.expo.dev/develop/unit-testing/)
 
 ### 8.3 단계 2 — Simulator 실행
 
@@ -375,7 +375,7 @@ mock 목록 표시 → 상세 이동 → 뒤로 가기 → 다크 모드 → 큰
 
 ### 8.4 단계 3 — 공개 읽기 API 연결
 
-T-033에서 §3의 고정 프록시를 구현·검증한 뒤 production 웹을 재빌드하는 배포 단계가 필요하다. 문서만 추가했거나 Python 코드만 수정했다고 공개 경로가 생기지 않는다. 프록시 변경 전에 `apps/web/AGENTS.md`와 설치된 Next.js 문서를 읽는다.
+2026-09-13 §3의 고정 GET 프록시를 구현하고 사용자 승인 후 production 웹을 재빌드·교체했다. 공개 HTTPS와 Simulator 조회 검증은 [연결 기록](mobile-validation/T-033-live-api.ko.md)을 따른다. 이후 프록시 변경에도 웹 재빌드 배포가 필요하다. 문서만 추가했거나 Python 코드만 수정했다고 공개 경로가 생기지 않는다. 프록시 변경 전에 `apps/web/AGENTS.md`와 설치된 Next.js 문서를 읽는다.
 
 모바일 디렉터리에 `.env.example`과 로컬 `.env.local`을 준비한다. 실제 서버의 루트 `.env`를 복사하지 않는다.
 
@@ -384,7 +384,7 @@ EXPO_PUBLIC_API_BASE_URL=https://YOUR_FUNNEL_HOST/api/mobile
 EXPO_PUBLIC_APP_ENV=development
 ```
 
-YOUR_FUNNEL_HOST를 `tailscale funnel status`에서 확인한 hostname으로 바꾼다. 로컬 파일은 Git에서 제외한다. config.ts에서 URL이 HTTPS인지 검증하고 production에 mock/localhost/미설정 값이 들어가면 빌드를 실패시키도록 구현한다. `EXPO_PUBLIC_*`는 번들에 포함되므로 비밀을 넣지 않는다. [Expo 환경변수](https://docs.expo.dev/guides/environment-variables/)
+현재 앱은 `https://jaehyeonui-macmini.tail598a5f.ts.net/api/mobile`을 기본값으로 사용하므로 별도 .env 없이 연결된다. 주소를 변경할 때만 위 값을 설정하고 Metro를 재시작한다. 로컬 파일은 Git에서 제외한다. `src/lib/api/client.ts`에서 HTTPS와 URL 형식을 검증한다. production 프로필은 아직 빌드할 수 없으며 배포 전 환경 검증을 추가한다. `EXPO_PUBLIC_*`는 번들에 포함되므로 비밀을 넣지 않는다. [Expo 환경변수](https://docs.expo.dev/guides/environment-variables/)
 
 프록시 배포 후의 읽기 확인 예시다. 첫 줄 URL을 실제 값으로 수정한다.
 
@@ -545,13 +545,13 @@ API·DB는 loopback을 유지한다. 프록시 변경은 production web 재빌�
 
 ## 10. 단계별 백로그
 
-기존 ID를 유지하되 Swift 전용 산출물을 Expo 산출물로 대체한다. T-033의 환경 확인·mock 뼈대·Simulator 첫 실행은 구현/검증되었다. 그 밖의 항목은 계획이며 T-033 전체 완료는 아니다. M5·M6 숫자 순서보다 다음 의존성 순서로 실행한다.
+기존 ID를 유지하되 Swift 전용 산출물을 Expo 산출물로 대체한다. T-033의 환경 확인·앱 뼈대·타입 생성·고정 읽기 프록시·실제 API 연결·Simulator 실행은 구현/검증되었다. 실기기·서명·배포는 남아 있으므로 T-033 전체 완료는 아니다. M5·M6 숫자 순서보다 다음 의존성 순서로 실행한다.
 
 | 순서 | 기존 ID | 구현 범위 | 완료 조건 |
 |---|---|---|---|
 | 0 | T-033 준비 | 도구·SDK·식별자·프로젝트 규칙·기록 | 실제 버전과 지원 iOS 확인, 기존 서비스 변경 없음 |
 | 1 | T-033 앱/API | Expo 앱·mock 화면·타입 생성·고정 읽기 프록시 | Simulator/iPhone 목록, 비허용 경로 차단, CI 기초 |
-| 2 | T-034 | 디자인 토큰·공통 상태 UI | 다크 모드·VoiceOver·큰 글자 실기기 확인 |
+| 2 | T-034 | 공통 theme.ts·ThemeText 구현, [편집 안내](../apps/mobile/THEME.md) | 자동 검사 후 VoiceOver·큰 글자 실기기 검증은 후속 |
 | 3 | T-035 | 피드 정렬·새로고침·오류 복구 | 실제 feed 계약 준수, cursor 없는 API의 무한 스크롤 미표방 |
 | 4 | T-036 | 상세·판매처 out-link·404 | 실제 기기 링크·뒤로 이동·삭제 상세 정상; 검색은 후속 |
 | 5 | T-039 | 공개 데이터 캐시 | 재실행/기내 모드/만료/온라인404 정리 검증 |
@@ -567,7 +567,7 @@ T-033은 앱 뼈대 완료와 배포 준비 항목을 구분해 기록한다. �
 
 ### 10.1 다음 작업을 시작할 때의 실행 단위
 
-첫 구현 요청은 **T-033의 환경 확인 + 앱 뼈대 + mock 피드 Simulator 실행**으로 시작한다. 이 단계는 푸시 제공자와 유료 계정이 정해지지 않아도 진행할 수 있다. 다음에는 읽기 프록시와 실제 API 연결, 이후 iPhone UI 검증으로 진행한다. 처음부터 계정·관심 목록·APNs·Android 배포를 한꺼번에 구현하지 않는다.
+**T-033의 환경 확인 + 앱 뼈대 + 실제 API 연결 + Simulator 실행**까지 완료했다. 다음은 iPhone 14 개발 빌드 설치와 실제 목록·상세·판매처 링크 UI 검증이다. 푸시 구현 전에는 제공자·설치 인증 계약을 확정한다. 처음부터 계정·관심 목록·APNs·Android 배포를 한꺼번에 구현하지 않는다.
 
 ### 10.2 완료 보고 형식
 

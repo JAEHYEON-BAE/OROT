@@ -23,6 +23,8 @@ export type Release = {
   format: string | null;
   variant: string | null;
   is_limited: boolean;
+  schedule_status?: "SCHEDULED" | "TBA" | "ON_SALE";
+  until_sold_out?: boolean;
   release_date: string | null;
   preorder_opens_at: string | null;
   preorder_closes_at: string | null;

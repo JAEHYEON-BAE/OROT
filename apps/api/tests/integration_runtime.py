@@ -259,6 +259,63 @@ async def calendar(session):
     assert "DTEND:20260911T001500Z" in body
 
 
+async def schedule_modes(session):
+    now = datetime.now(UTC)
+    release = await create_release(
+        ReleaseIn(
+            title="isolated modes",
+            preorder_opens_at=now + timedelta(days=1),
+            preorder_closes_at=now + timedelta(days=2),
+            release_date=now.date(),
+        ),
+        session,
+        None,
+    )
+    await publish_release(release.id, session, None)
+    await generate_due_events(session, now=now)
+    changed = await update_release(release.id, ReleaseUpdate(schedule_status="TBA"), session, None)
+    assert changed.schedule_status == "TBA"
+    assert changed.preorder_opens_at is None and changed.preorder_closes_at is None
+    assert changed.release_date is None
+    assert (await generate_due_events(session, now=now)).total == 0
+    stale = await session.scalar(
+        select(func.count())
+        .select_from(ListingEvent)
+        .where(ListingEvent.release_id == release.id, ListingEvent.superseded_at.is_not(None))
+    )
+    assert stale >= 1
+    changed = await update_release(
+        release.id,
+        ReleaseUpdate(schedule_status="ON_SALE", preorder_closes_at=now + timedelta(days=2)),
+        session,
+        None,
+    )
+    assert changed.schedule_status == "ON_SALE" and changed.preorder_closes_at is not None
+    changed = await update_release(release.id, ReleaseUpdate(until_sold_out=True), session, None)
+    assert changed.until_sold_out and changed.preorder_closes_at is None
+    changed = await update_release(release.id, ReleaseUpdate(title="renamed"), session, None)
+    assert changed.schedule_status == "ON_SALE" and changed.until_sold_out
+    changed = await update_release(
+        release.id,
+        ReleaseUpdate(
+            schedule_status="SCHEDULED",
+            until_sold_out=False,
+            preorder_opens_at=now + timedelta(days=3),
+            preorder_closes_at=now + timedelta(days=4),
+        ),
+        session,
+        None,
+    )
+    assert changed.preorder_opens_at is not None and changed.preorder_closes_at is not None
+    await session.refresh(await session.get(Release, release.id))
+    # Public serialization must carry the explicit status, without operator notes.
+    from orot_api.serializers import release_to_out
+
+    public = await release_to_out(session, await session.get(Release, release.id))
+    assert public.schedule_status == "SCHEDULED"
+    assert "notes" not in public.model_dump()
+
+
 async def main():
     engine = get_engine()
     schema = "audit_" + uuid4().hex
@@ -276,6 +333,7 @@ async def main():
                 ("gone", gone),
                 ("admin CRUD/draft schedule", admin_flow),
                 ("KST/ICS", calendar),
+                ("schedule modes/partial edits/stale events", schedule_modes),
             ]
             for reason in ("unpublish", "unsubscribe", "supersede"):
 

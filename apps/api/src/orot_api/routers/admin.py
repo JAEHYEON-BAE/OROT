@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, status
 from orot_core.enums import Curation, EventType
 from orot_core.models import Artist, Listing, ListingEvent, Release, ReleaseLink
 from orot_core.schedule_events import supersede_stale_events
+from pydantic import ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import CursorResult
@@ -26,6 +27,7 @@ from orot_api.schemas.release import (
     ReleaseLinkIn,
     ReleaseLinkOut,
     ReleaseUpdate,
+    ScheduleInput,
 )
 
 log = structlog.get_logger(__name__)
@@ -102,6 +104,8 @@ async def _to_out(session: AsyncSession, release: Release) -> ReleaseAdminOut:
         format=release.format,
         variant=release.variant,
         is_limited=release.is_limited,
+        schedule_status=release.schedule_status or "SCHEDULED",
+        until_sold_out=release.until_sold_out or False,
         release_date=release.release_date,
         preorder_opens_at=release.preorder_opens_at,
         preorder_closes_at=release.preorder_closes_at,
@@ -148,6 +152,8 @@ async def create_release(payload: ReleaseIn, session: SessionDep, _: AdminDep) -
         format=payload.format,
         variant=payload.variant,
         is_limited=payload.is_limited,
+        schedule_status=payload.schedule_status,
+        until_sold_out=payload.until_sold_out,
         release_date=payload.release_date,
         preorder_opens_at=payload.preorder_opens_at,
         preorder_closes_at=payload.preorder_closes_at,
@@ -185,7 +191,13 @@ async def create_release(payload: ReleaseIn, session: SessionDep, _: AdminDep) -
 
 # 바뀌면 **구독자가 알아야 하는** 필드. 제목·메모가 바뀐 것은 알림거리가 아니지만,
 # 시각이 바뀐 것은 다르다 — 구독자는 옛 시각을 알고 기다리고 있다.
-SCHEDULE_FIELDS: Final = ("preorder_opens_at", "preorder_closes_at", "release_date")
+SCHEDULE_FIELDS: Final = (
+    "preorder_opens_at",
+    "preorder_closes_at",
+    "release_date",
+    "schedule_status",
+    "until_sold_out",
+)
 
 
 def _schedule_snapshot(release: Release) -> dict[str, str | None]:
@@ -193,7 +205,11 @@ def _schedule_snapshot(release: Release) -> dict[str, str | None]:
     snapshot: dict[str, str | None] = {}
     for field in SCHEDULE_FIELDS:
         value = getattr(release, field)
-        snapshot[field] = value.isoformat() if value is not None else None
+        snapshot[field] = (
+            (value.isoformat() if hasattr(value, "isoformat") else str(value))
+            if value is not None
+            else None
+        )
     return snapshot
 
 
@@ -205,7 +221,19 @@ async def update_release(
     # 수정 **전** 시각을 먼저 떠 둔다. setattr 뒤에는 옛 값을 알 방법이 없다.
     before = _schedule_snapshot(release)
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    schedule = {field: getattr(release, field) for field in ScheduleInput.model_fields}
+    schedule["schedule_status"] = schedule["schedule_status"] or "SCHEDULED"
+    schedule["until_sold_out"] = schedule["until_sold_out"] or False
+    schedule.update({key: value for key, value in updates.items() if key in schedule})
+    try:
+        updates.update(ScheduleInput.model_validate(schedule).model_dump())
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "일정 상태와 날짜 범위를 확인해주세요."
+        ) from exc
+
+    for field, value in updates.items():
         if field == "links":
             continue
         if field == "artist_name":

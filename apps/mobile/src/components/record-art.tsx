@@ -1,60 +1,102 @@
-import { StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { Image, StyleSheet, View } from "react-native";
+import { theme, usePalette } from "@/lib/theme";
+
+const placeholder = theme.images.recordPlaceholder();
 
 export function RecordArt({
   color,
+  uri,
   large = false,
 }: {
-  color: string;
+  color?: string;
+  uri?: string | null;
   large?: boolean;
 }) {
+  const colors = usePalette();
+  const coverColor = color ?? colors.recordCover;
+  const [failedUri, setFailedUri] = useState<string>();
+  const [placeholderFailed, setPlaceholderFailed] = useState(false);
+  const showCover = !!uri && uri !== failedUri && /^https?:\/\//.test(uri);
+  const source = showCover
+    ? { uri }
+    : placeholderFailed
+      ? undefined
+      : placeholder;
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.cover, { backgroundColor: color }, large && styles.large]}
+      style={[
+        styles.cover,
+        { backgroundColor: coverColor },
+        large && styles.large,
+      ]}
     >
-      <View style={styles.disc}>
-        <View style={styles.groove}>
-          <View style={[styles.label, { backgroundColor: color }]}>
-            <View style={styles.hole} />
+      {source ? (
+        <Image
+          source={source}
+          resizeMode="contain"
+          onError={() =>
+            showCover ? setFailedUri(uri) : setPlaceholderFailed(true)
+          }
+          style={styles.image}
+        />
+      ) : (
+        <View style={[styles.disc, { backgroundColor: colors.recordDisc }]}>
+          <View style={[styles.groove, { borderColor: colors.recordGroove }]}>
+            <View style={[styles.label, { backgroundColor: coverColor }]}>
+              <View
+                style={[styles.hole, { backgroundColor: colors.recordHole }]}
+              />
+            </View>
           </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
+const art = theme.recordArt;
 const styles = StyleSheet.create({
   cover: {
-    width: 72,
-    height: 80,
-    borderRadius: 8,
+    width: art.thumbnailWidth,
+    height: art.thumbnailHeight,
+    borderRadius: theme.radius.small,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
-  large: { width: "100%", height: 230, borderRadius: 18 },
+  image: { width: "100%", height: "100%" },
+  large: {
+    width: "100%",
+    height: art.detailHeight,
+    borderRadius: theme.radius.cover,
+  },
   disc: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#242723",
+    width: art.disc,
+    height: art.disc,
+    borderRadius: theme.radius.circle,
     alignItems: "center",
     justifyContent: "center",
   },
   groove: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: art.groove,
+    height: art.groove,
+    borderRadius: theme.radius.circle,
     borderWidth: 1,
-    borderColor: "#61635C",
     alignItems: "center",
     justifyContent: "center",
   },
   label: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: art.label,
+    height: art.label,
+    borderRadius: theme.radius.circle,
     alignItems: "center",
     justifyContent: "center",
   },
-  hole: { width: 5, height: 5, borderRadius: 3, backgroundColor: "#F7F4ED" },
+  hole: {
+    width: art.hole,
+    height: art.hole,
+    borderRadius: theme.radius.circle,
+  },
 });

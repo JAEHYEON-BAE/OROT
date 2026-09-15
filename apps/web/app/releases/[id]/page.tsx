@@ -25,6 +25,9 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
   const rows: [string, string][] = [];
   if (release.label) rows.push(["레이블", release.label]);
   if (release.variant) rows.push(["바리언트", release.variant]);
+  if (release.schedule_status === "TBA") rows.push(["일정", "발매일 미정"]);
+  if (release.schedule_status === "ON_SALE") rows.push(["판매 상태", release.preorder_closes_at && Date.now() >= Date.parse(release.preorder_closes_at) ? "판매 종료" : "판매 중"]);
+  if (release.until_sold_out) rows.push(["종료 조건", "매진 시까지"]);
   if (release.preorder_opens_at)
     rows.push([
       "예약 시작",

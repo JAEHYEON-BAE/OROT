@@ -50,6 +50,16 @@ _PAGE = """<!doctype html>
               background: transparent; color: inherit; }
   td button.pub { background: #2a6; color: #fff; border-color: #2a6; }
   body.editing { background: #2a60a; }
+  .schedule-toggles { display:flex; gap:1rem; flex-wrap:wrap; }
+  label.toggle { display:flex; align-items:center; gap:.5rem; cursor:pointer; }
+  .toggle input { appearance:none; width:2.5rem; height:1.4rem; border-radius:1rem;
+    padding:0; margin:0; background:#777; position:relative; flex-shrink:0; }
+  .toggle input::after { content:""; position:absolute; width:1rem; height:1rem;
+    top:.14rem; left:.15rem; border-radius:50%; background:white; transition:transform .15s; }
+  .toggle input:checked { background:#268253; }
+  .toggle input:checked::after { transform:translateX(1rem); }
+  input:disabled { opacity:.45; cursor:not-allowed; }
+  .toggle input:focus-visible { outline:2px solid #268253; outline-offset:3px; }
   body.editing #h1::after { content: " — 수정 중"; color: #2a6; }
   .link-row label { margin-top: 0; }
   @media (max-width: 640px) { .link-row { grid-template-columns: 1fr; } }
@@ -109,13 +119,24 @@ _PAGE = """<!doctype html>
 
   <fieldset>
     <legend>일정</legend>
+    <div class="schedule-toggles">
+      <label class="toggle"><input type="checkbox" id="scheduleTba" role="switch">
+        발매일 미정</label>
+      <label class="toggle"><input type="checkbox" id="scheduleOnSale" role="switch">판매 중</label>
+    </div>
+    <p class="hint" id="scheduleHint" aria-live="polite">
+      날짜를 직접 입력하거나 일정 상태를 선택하세요.</p>
     <div class="row">
-      <div><label>예약 시작</label><input name="preorder_opens_at" type="datetime-local">
+      <div><label for="startsAt">시작 날짜 (예약 시작)</label>
+        <input id="startsAt" name="preorder_opens_at" type="datetime-local">
         <p class="hint">알림이 발송되는 시각입니다. 한국 시간(KST)으로 입력하세요.</p></div>
-      <div><label>예약 마감</label><input name="preorder_closes_at" type="datetime-local">
+      <div><label for="endsAt">종료 날짜 (예약 마감)</label>
+        <input id="endsAt" name="preorder_closes_at" type="datetime-local">
+        <label class="toggle"><input type="checkbox" id="untilSoldOut" role="switch">
+          매진 시까지</label>
         <p class="hint">모르면 비워 두세요.</p></div>
     </div>
-    <label>발매일</label><input name="release_date" type="date">
+    <label for="releaseDate">발매일</label><input id="releaseDate" name="release_date" type="date">
   </fieldset>
 
   <fieldset>
@@ -292,10 +313,30 @@ function collectLinks() {
 $("#addLink").addEventListener("click", () => addLinkRow());
 addLinkRow();
 
+// Disabled values stay in the form until saved, but never enter the payload.
+function syncSchedule(changed) {
+  const tba = $("#scheduleTba"), sale = $("#scheduleOnSale"), until = $("#untilSoldOut");
+  if (changed === "tba" && tba.checked) sale.checked = false;
+  if (changed === "sale" && sale.checked) tba.checked = false;
+  const f = $("#f");
+  f.elements.preorder_opens_at.disabled = tba.checked || sale.checked;
+  f.elements.preorder_closes_at.disabled = tba.checked || until.checked;
+  f.elements.release_date.disabled = tba.checked;
+  until.disabled = tba.checked;
+  $("#scheduleHint").textContent = tba.checked
+    ? "발매일 미정: 시작·종료·발매일은 저장하지 않습니다."
+    : sale.checked ? "판매 중: 시작 날짜 없이 저장합니다. 종료 날짜는 선택할 수 있습니다."
+    : "날짜를 직접 입력하세요. 매진 시까지를 선택하면 종료 날짜는 저장하지 않습니다.";
+}
+$("#scheduleTba").addEventListener("change", () => syncSchedule("tba"));
+$("#scheduleOnSale").addEventListener("change", () => syncSchedule("sale"));
+$("#untilSoldOut").addEventListener("change", () => syncSchedule("until"));
+
 // ── 편집 모드 ────────────────────────────────────────────────
 function resetForm() {
   editingId = null;
   $("#f").reset();
+  syncSchedule();
   $("#links").innerHTML = "";
   addLinkRow();
   document.body.classList.remove("editing");
@@ -327,6 +368,10 @@ function startEdit(r) {
   set("preorder_opens_at", toLocalInput(r.preorder_opens_at));
   set("preorder_closes_at", toLocalInput(r.preorder_closes_at));
   f.elements["is_limited"].checked = !!r.is_limited;
+  $("#scheduleTba").checked = r.schedule_status === "TBA";
+  $("#scheduleOnSale").checked = r.schedule_status === "ON_SALE";
+  $("#untilSoldOut").checked = !!r.until_sold_out;
+  syncSchedule();
 
   $("#links").innerHTML = "";
   if (r.links.length) r.links.forEach(addLinkRow);
@@ -351,6 +396,9 @@ function readForm() {
     format: d.format || null,
     variant: d.variant || null,
     is_limited: !!d.is_limited,
+    schedule_status: $("#scheduleTba").checked ? "TBA"
+      : $("#scheduleOnSale").checked ? "ON_SALE" : "SCHEDULED",
+    until_sold_out: !$("#scheduleTba").checked && $("#untilSoldOut").checked,
     release_date: d.release_date || null,
     preorder_opens_at: toKst(d.preorder_opens_at),
     preorder_closes_at: toKst(d.preorder_closes_at),
@@ -410,7 +458,9 @@ async function load() {
       <tr class="${r.is_published ? "" : "draft"}">
         <td>${r.id}</td>
         <td>${esc(r.artist_name ? r.artist_name + " — " : "")}${esc(r.title)}</td>
-        <td>${esc(fmt(r.preorder_opens_at))}</td>
+        <td>${esc(r.schedule_status === "TBA" ? "발매일 미정"
+          : r.schedule_status === "ON_SALE" ? "판매 중" : fmt(r.preorder_opens_at))}
+          ${r.until_sold_out ? " · 매진 시까지" : ""}</td>
         <td>${r.links.length ? esc(r.links.map((l) => l.shop_name).join(", ")) : "-"}</td>
         <td>${r.is_published ? "공개" : "초안"}</td>
         <td>

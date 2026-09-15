@@ -38,3 +38,12 @@ test("unknown dates never display an event or registration timestamp", () => {
   assert.equal(feedDisplay(r, Date.now()).status, "일정 미정");
   assert.equal(feedDisplay(r, Date.now()).at, null);
 });
+
+
+test("explicit sale mode handles deadline and TBA", () => {
+  const sale = { ...release, preorder_opens_at: null, schedule_status: "ON_SALE" };
+  assert.equal(feedDisplay(sale, Date.parse("2026-09-12")).status, "판매 중");
+  assert.equal(feedDisplay(sale, Date.parse("2026-09-14")).status, "판매 종료");
+  assert.equal(feedDisplay({ ...sale, preorder_closes_at: null, until_sold_out: true }, Date.parse("2027-01-01")).status, "판매 중");
+  assert.equal(feedDisplay({ ...sale, schedule_status: "TBA" }, Date.now()).status, "발매일 미정");
+});

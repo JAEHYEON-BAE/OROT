@@ -41,17 +41,3 @@ export const demoReleases: readonly DemoRelease[] = [
     color: "#746080",
   },
 ];
-export type FeedSort = "imminent" | "recent";
-export function sortDemoReleases(sort: FeedSort): DemoRelease[] {
-  return [...demoReleases].sort((a, b) => {
-    if (sort === "recent")
-      return Date.parse(b.updated_at) - Date.parse(a.updated_at);
-    const time = (r: DemoRelease) =>
-      r.preorder_opens_at ? Date.parse(r.preorder_opens_at) : Infinity;
-    return time(a) - time(b) || a.id - b.id;
-  });
-}
-export function findDemoRelease(id: string | undefined) {
-  if (!id || !/^[1-9]\d*$/.test(id)) return undefined;
-  return demoReleases.find((release) => String(release.id) === id);
-}

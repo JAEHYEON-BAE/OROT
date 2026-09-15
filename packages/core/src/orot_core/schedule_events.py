@@ -202,6 +202,9 @@ STALE_ON_CHANGE: Final[dict[str, tuple[EventType, ...]]] = {
     # 예약 마감 시각에 걸린 이벤트는 아직 없다. 바뀌어도 무효화할 것이 없지만,
     # `SCHEDULE_CHANGED` 자체는 나간다 — 구독자가 알아야 하는 변경이다.
     "preorder_closes_at": (),
+    # Modes normalize dates before comparison; date changes invalidate their own events.
+    "schedule_status": (),
+    "until_sold_out": (),
 }
 
 

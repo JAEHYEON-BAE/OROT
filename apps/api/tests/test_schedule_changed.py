@@ -33,6 +33,8 @@ def test_snapshot_covers_exactly_the_schedule_fields() -> None:
         "preorder_opens_at",
         "preorder_closes_at",
         "release_date",
+        "schedule_status",
+        "until_sold_out",
     }
     assert set(_schedule_snapshot(_release())) == set(SCHEDULE_FIELDS)
 

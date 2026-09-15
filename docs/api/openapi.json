@@ -1256,6 +1256,21 @@
             "type": "boolean",
             "title": "Is Limited"
           },
+          "schedule_status": {
+            "type": "string",
+            "enum": [
+              "SCHEDULED",
+              "TBA",
+              "ON_SALE"
+            ],
+            "title": "Schedule Status",
+            "default": "SCHEDULED"
+          },
+          "until_sold_out": {
+            "type": "boolean",
+            "title": "Until Sold Out",
+            "default": false
+          },
           "release_date": {
             "anyOf": [
               {
@@ -1348,6 +1363,57 @@
       },
       "ReleaseIn": {
         "properties": {
+          "schedule_status": {
+            "type": "string",
+            "enum": [
+              "SCHEDULED",
+              "TBA",
+              "ON_SALE"
+            ],
+            "title": "Schedule Status",
+            "default": "SCHEDULED"
+          },
+          "until_sold_out": {
+            "type": "boolean",
+            "title": "Until Sold Out",
+            "default": false
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "preorder_opens_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preorder Opens At"
+          },
+          "preorder_closes_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preorder Closes At"
+          },
           "title": {
             "type": "string",
             "minLength": 1,
@@ -1401,42 +1467,6 @@
             "type": "boolean",
             "title": "Is Limited",
             "default": false
-          },
-          "release_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Release Date"
-          },
-          "preorder_opens_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preorder Opens At"
-          },
-          "preorder_closes_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preorder Closes At"
           },
           "cover_url": {
             "anyOf": [
@@ -1628,6 +1658,21 @@
             "type": "boolean",
             "title": "Is Limited"
           },
+          "schedule_status": {
+            "type": "string",
+            "enum": [
+              "SCHEDULED",
+              "TBA",
+              "ON_SALE"
+            ],
+            "title": "Schedule Status",
+            "default": "SCHEDULED"
+          },
+          "until_sold_out": {
+            "type": "boolean",
+            "title": "Until Sold Out",
+            "default": false
+          },
           "release_date": {
             "anyOf": [
               {
@@ -1732,6 +1777,33 @@
       },
       "ReleaseUpdate": {
         "properties": {
+          "schedule_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SCHEDULED",
+                  "TBA",
+                  "ON_SALE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schedule Status"
+          },
+          "until_sold_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until Sold Out"
+          },
           "title": {
             "anyOf": [
               {

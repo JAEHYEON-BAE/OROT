@@ -2,6 +2,7 @@
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Literal
 from urllib.parse import urlparse
 
 from orot_core.enums import Curation
@@ -78,32 +79,17 @@ class ReleaseLinkOut(BaseModel):
         return v
 
 
-class ReleaseIn(BaseModel):
-    """일정 등록 입력.
+ScheduleStatus = Literal["SCHEDULED", "TBA", "ON_SALE"]
 
-    운영자가 채우는 값이다. `title` 외에는 전부 선택이며,
-    **알림의 트리거는 `preorder_opens_at`** 이다.
-    """
 
-    title: str = Field(min_length=1)
-    artist_name: str | None = None
-    label: str | None = None
-    format: str | None = None
-    variant: str | None = None
-    is_limited: bool = False
+class ScheduleInput(BaseModel):
+    """Normalize the complete schedule, including stored values on PATCH."""
+
+    schedule_status: ScheduleStatus = "SCHEDULED"
+    until_sold_out: bool = False
     release_date: date | None = None
     preorder_opens_at: datetime | None = None
     preorder_closes_at: datetime | None = None
-    cover_url: str | None = None
-    notes: str | None = None
-    links: list[ReleaseLinkIn] = Field(default_factory=list)
-
-    @field_validator("title")
-    @classmethod
-    def _nonempty_title(cls, value: str) -> str:
-        if value is None or not value.strip():
-            raise ValueError("제목은 비어 있을 수 없습니다.")
-        return value.strip()
 
     @field_validator("preorder_opens_at", "preorder_closes_at")
     @classmethod
@@ -121,13 +107,22 @@ class ReleaseIn(BaseModel):
         return v.astimezone(UTC)
 
     @model_validator(mode="after")
-    def _check_window(self) -> "ReleaseIn":
+    def _check_window(self) -> "ScheduleInput":
         """예약 마감이 시작보다 빠를 수 없다.
 
         **모델 검증기로 둔다.** 별도 메서드로 두면 새 엔드포인트에서 호출을 빠뜨릴 수 있고,
         그러면 구간이 음수인 일정이 조용히 저장된다.
         검증기는 `model_validate` 를 거치는 모든 경로에서 자동으로 돈다.
         """
+        if self.schedule_status == "TBA":
+            self.preorder_opens_at = None
+            self.preorder_closes_at = None
+            self.release_date = None
+            self.until_sold_out = False
+        elif self.schedule_status == "ON_SALE":
+            self.preorder_opens_at = None
+        if self.until_sold_out:
+            self.preorder_closes_at = None
         if (
             self.preorder_opens_at is not None
             and self.preorder_closes_at is not None
@@ -138,9 +133,36 @@ class ReleaseIn(BaseModel):
         return self
 
 
+class ReleaseIn(ScheduleInput):
+    """일정 등록 입력.
+
+    운영자가 채우는 값이다. `title` 외에는 전부 선택이며,
+    **알림의 트리거는 `preorder_opens_at`** 이다.
+    """
+
+    title: str = Field(min_length=1)
+    artist_name: str | None = None
+    label: str | None = None
+    format: str | None = None
+    variant: str | None = None
+    is_limited: bool = False
+    cover_url: str | None = None
+    notes: str | None = None
+    links: list[ReleaseLinkIn] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def _nonempty_title(cls, value: str) -> str:
+        if value is None or not value.strip():
+            raise ValueError("제목은 비어 있을 수 없습니다.")
+        return value.strip()
+
+
 class ReleaseUpdate(BaseModel):
     """부분 수정. 보낸 필드만 바뀐다."""
 
+    schedule_status: ScheduleStatus | None = None
+    until_sold_out: bool | None = None
     title: str | None = Field(default=None, min_length=1)
     artist_name: str | None = None
     label: str | None = None
@@ -161,11 +183,11 @@ class ReleaseUpdate(BaseModel):
             raise ValueError("제목은 비어 있을 수 없습니다.")
         return value.strip()
 
-    @field_validator("is_limited")
+    @field_validator("is_limited", "until_sold_out", "schedule_status")
     @classmethod
-    def _nonnull_limited(cls, value: bool | None) -> bool:
+    def _nonnull_limited(cls, value: bool | str | None) -> bool | str:
         if value is None:
-            raise ValueError("is_limited 는 null 일 수 없습니다.")
+            raise ValueError("상태와 토글 값은 null 일 수 없습니다.")
         return value
 
     @field_validator("preorder_opens_at", "preorder_closes_at")
@@ -192,6 +214,8 @@ class ReleaseOut(BaseModel):
     format: str | None = None
     variant: str | None = None
     is_limited: bool
+    schedule_status: ScheduleStatus = "SCHEDULED"
+    until_sold_out: bool = False
     release_date: date | None = None
     preorder_opens_at: datetime | None = None
     preorder_closes_at: datetime | None = None

@@ -1,6 +1,6 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { usePalette } from "@/lib/theme";
+import { theme, usePalette } from "@/lib/theme";
 
 export default function RootLayout() {
   const colors = usePalette();
@@ -11,6 +11,7 @@ export default function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.text,
+          headerTitleStyle: theme.typography.sectionTitle,
           contentStyle: { backgroundColor: colors.background },
           headerShadowVisible: false,
         }}
