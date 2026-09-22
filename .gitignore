@@ -38,3 +38,8 @@ out/
 ._*
 .mv_preview.html
 .playwright-mcp/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
