@@ -1,6 +1,6 @@
 # OROT — Vinyl Release and Preorder Schedule Blueprint (English)
 
-> **Reviewed: 2026-09-11 · Version 1.1.0**. Current behavior is described from source, migrations and runtime configuration.
+> **Reviewed: 2026-09-15 · Version 1.1.0**. Current behavior is described from source, migrations and runtime configuration.
 > When implementation and prose disagree, update the prose to match implementation. Planned features are not current behavior or instructions to enable them.
 > Maintain this alongside the [Korean edition](BLUEPRINT.ko.md); reconcile the Korean text first when the editions disagree, then translate.
 
@@ -526,7 +526,10 @@ Compare the incoming `RawItem` against the stored `listings` state.
 | URL 404 / absent on 3 consecutive crawls | `DELISTED` |
 
 A priority queue and daily digest are not implemented. Current M2 handles all notifiable events in the same
-60-second tick, processing PENDING before FAILED retries, then creation time/ID ascending, at most 500 per dispatch.
+60-second tick. Planning prioritizes PREORDER_OPEN; dispatch orders PENDING before FAILED, then PREORDER_OPEN, creation time and ID, at most 500 per dispatch.
+Planning and each result commit separately; HTTP holds no transaction. At most five sends run concurrently, serially per subscription, with no new send starting after 45 seconds.
+A session advisory lock serializes collectors. Committed sends survive interruption; up to five in-flight sends still have an external-acceptance/commit gap.
+The 500-row cap remains a capacity limit; load validation is required before wider rollout.
 
 > That table is the **diff rule set for harvesting (M3)**. Today (M2) the operator enters
 > times directly, so no diff engine is needed and only the time-driven rules below run.
@@ -739,7 +742,7 @@ migrations/versions/ / alembic.ini
 infra/{env-backup,env-restore,orot-start,orot-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
-.github/workflows/ci.yml            # T-012 Python + web verification
+.github/workflows/ci.yml            # T-012 Python + web + mobile verification
 backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
@@ -832,13 +835,16 @@ on the Mac mini and is not an EC2 deployment command.
 | Component | Development: make up | Public test: make prod |
 |---|---|---|
 | Web | next dev with source mounts | Built image with next start; web mounts removed |
-| API | Source mounts and uvicorn --reload | Same mounts/reload; ENVIRONMENT=production |
-| Collector | Source mounts; scheduler; no automatic reload | Same; ENVIRONMENT=production |
+| API | Source mounts and uvicorn --reload | Image source; no reload or source mounts; ENVIRONMENT=production |
+| Collector | Source mounts; scheduler; no automatic reload | Image source; no source mounts; ENVIRONMENT=production |
 | DB/ports | postgres_data volume; loopback 5432/8000/3000 bindings | Same |
 
-API Python edits reload automatically. Collector Python edits require `docker compose restart collector`.
-Rebuild production web edits and dependency changes. Environment/Compose changes require container recreation
+Development API edits reload; development collector edits require restart.
+Production API, collector, web and dependency edits require rebuilding with `make prod`. Environment/Compose changes require container recreation
 with `make prod` or `up -d` using the same overlay; restart alone does not update environment variables.
+Removing source mounts also removes `./migrations`. In production `make migrate` applies only the revisions baked
+into the image, so rebuild with `make prod` before applying a new one, and run `make revision` in development
+because a file generated inside the container is lost when the container is recreated.
 
 | Variable | Consumer and purpose |
 |---|---|
@@ -930,13 +936,18 @@ The editor uses the same configuration; missing imports are not globally suppres
 `T-012` in `.github/workflows/ci.yml` runs on all PRs, main pushes and manual dispatch.
 The Python 3.12 job runs `make install`, `make lint`, `make test`, applies migrations to disposable
 PostgreSQL 16 with `venv/bin/python -m alembic upgrade head`, then executes
-`venv/bin/python apps/api/tests/integration_runtime.py` for nine isolated scenarios and schema rollback.
-Those scenarios use a separate ORM-created schema, not the migrated schema directly.
-The Node 22 job runs `npm ci`, web lint, Node regression tests and a production build.
+`alembic check` and an OpenAPI regeneration diff.
+`integration_runtime.py` applies actual migrations in an isolated schema, exercises scenarios and rolls back.
+`integration_dispatch.py` verifies durable commits, concurrency and interruption using a fake sender, then removes only its own UUID schema.
+Autogenerate cannot detect every change, including CHECK constraint changes; behavioral DB checks remain necessary.
+The Node 22 web job runs `npm ci`, lint, Node regression tests and a production build.
+A separate mobile job uses the pinned Node version for `npm ci`, `npm run check` and generated API type drift checks.
 Each job has a 15-minute timeout; newer runs cancel older runs for the same ref. Repository permissions
 are `contents: read`; no production secrets, databases or real notifications are used. Verify GitHub run
 results and required-check settings separately in the repository.
 GHCR publishing, SSH deploy and automatic rollback remain absent; operational startup uses Compose.
+
+Host monitoring, retries and backup success records are described in the [operations guide](operations-reliability.ko.md). Generated configuration does not prove launchd registration, Slack receipt or external backup success.
 
 ### 9.6 Cost and Operational Scope
 
@@ -973,7 +984,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-009 | `pipeline.py`: RawItem → listings upsert (1:1 release creation, no merging yet) | `collector run --source gimbab` populates the DB |
 | T-010 | `GET /v1/releases` with cursor pagination | Exposed in OpenAPI; returns real data |
 | T-011 | Next.js feed screen (SSR, no filters) | List renders at `localhost:3000` |
-| T-012 | GitHub Actions CI (Python, web, PostgreSQL integration) | PR/main push runs both jobs; lint, test, migration or web build failures fail the corresponding job (§9.5) |
+| T-012 | GitHub Actions CI (Python, web, mobile, PostgreSQL integration) | PR/main push runs all three jobs; lint, test, migration or web build failures fail the corresponding job (§9.5) |
 | **M0 closed scope** | Scaffolding, schema and collection components; crawl-to-DB-to-web remains deferred | |
 
 ### M1 — Manual Curation → Public Feed ([ADR-0005](adr/0005-manual-curation-first.md))
@@ -990,7 +1001,7 @@ Each task is written to be **independently verifiable**. Agents must cite the ta
 | T-106 | `GET /v1/feed` — timeline ordered by imminent preorder | Mixed event/schedule ordering |
 | T-107 | `GET /v1/releases.ics` (iCalendar) | Verified by subscribing in a real calendar app |
 | T-108 | `GET /v1/feed.rss` (RSS 2.0) | Verified in a feed reader |
-| T-109 | Operator entry screen (minimal web form) | Schedule created from the browser |
+| T-109 | Operator entry screen (minimal web form) | Browser entry, TBA/on-sale/until-sold-out toggles and disabled date inputs (2026-09-14 extension) |
 | T-110 | User feed and calendar screens (Next.js SSR) | Monthly grid renders at `localhost:3000` |
 
 ### M2 — Time-Driven Notifications
@@ -1073,7 +1084,7 @@ T-034 now centralizes colors, fonts, images and spacing in `apps/mobile/theme.ts
 | T-042 | Permission and notification tap navigation | Foreground/background/cold start and invalid payload tested on iPhone |
 | T-043 | Initial global notifications on/off; daily digest deferred | OS permission and server registration state reconciled |
 
-Follow [mobile blueprint §10](MOBILE_BLUEPRINT.ko.md) for substeps. Mobile gates can precede M3/M4. Extend T-012 with mobile checks; retained IDs do not imply implementation or completion of deferred subfeatures.
+Follow [mobile blueprint §10](MOBILE_BLUEPRINT.ko.md) for substeps. Mobile gates can precede M3/M4. T-012 includes mobile checks and generated-type drift checks; retained IDs do not imply implementation or completion of deferred subfeatures.
 
 ### M7 — Operational Hardening
 

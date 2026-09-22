@@ -1,27 +1,27 @@
 #!/bin/bash
-# 자동 백업 (T-120). launchd 가 하루 한 번 부른다.
-#
-# **볼륨은 실수 삭제만 막는다** — 디스크 고장이나 잘못된 마이그레이션은 막지 못한다.
-# 그래서 덤프를 따로 남긴다. 오래된 것은 30개만 유지한다.
+# DB and env backups report independent success; no silent skip or pruning.
 set -euo pipefail
-
+umask 077
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 cd "$PROJECT_DIR"
-
+mkdir -p backups/status
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
-
-if ! docker compose ps --status running --services 2>/dev/null | grep -qx postgres; then
-  log "postgres 가 떠 있지 않습니다 — 백업을 건너뜁니다"
-  exit 0
+result=0
+if make backup; then
+  date +%s > backups/status/db.ok.tmp
+  mv backups/status/db.ok.tmp backups/status/db.ok
+else
+  log "DB 백업 실패 — 마지막 성공 시각을 유지합니다"
+  result=1
 fi
-
-make backup
-make backup-prune
-
-# .env 도 함께. DB 만 있고 키가 없으면 복구해도 푸시가 살아나지 않는다.
-# 암호가 키체인에 없으면 스크립트가 실패하는데, 그것 때문에 DB 백업까지
-# 실패한 것처럼 보이지 않도록 여기서 흡수한다.
-if ! infra/env-backup.sh; then
-  log "경고: .env 백업에 실패했습니다 ('make backup-env-setup' 을 실행했는지 확인)"
+if infra/env-backup.sh; then
+  shasum -a 256 .env | awk '{print $1}' > backups/status/env.sha256.tmp
+  mv backups/status/env.sha256.tmp backups/status/env.sha256
+  date +%s > backups/status/env.ok.tmp
+  mv backups/status/env.ok.tmp backups/status/env.ok
+else
+  log "환경 백업 실패 — 키체인 접근과 목적지를 확인하십시오"
+  result=1
 fi
+exit "$result"

@@ -16,13 +16,13 @@ import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from orot_core.alerts import Alert, AlertSender, NullAlertSender, ThrottledAlerts
-from orot_core.db import get_engine, session_scope
+from orot_core.db import get_engine, get_session_factory, session_scope
 from orot_core.logging import configure_logging
 from orot_core.notifications import (
     MAX_ATTEMPTS,
     DispatchResult,
     PushSender,
-    dispatch_pending,
+    dispatch_committed,
 )
 from orot_core.schedule_events import generate_due_events
 from orot_core.settings import get_settings
@@ -76,15 +76,29 @@ async def tick(sender: PushSender | None = None, alerts: ThrottledAlerts | None 
     alerter = alerts if alerts is not None else _default_alerts()
 
     try:
-        async with session_scope() as session:
-            # Serialize overlapping collector processes, not just jobs in one process.
-            if not await session.scalar(text("SELECT pg_try_advisory_xact_lock(86170421)")):
+        # Session-level lock survives short transaction commits. It must be unlocked
+        # on this exact connection before returning it to the pool.
+        async with get_engine().connect() as connection:
+            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            locked = await connection.scalar(text("SELECT pg_try_advisory_lock(86170421)"))
+            if not locked:
                 log.info("scheduler.already_running")
                 return
-            events = await generate_due_events(session, now=started)
-            dispatch = await dispatch_pending(
-                session, push, base_url=settings.public_web_url, now=started
-            )
+            try:
+                async with session_scope() as session:
+                    events = await generate_due_events(session, now=started)
+                dispatch = await dispatch_committed(
+                    get_session_factory(), push, base_url=settings.public_web_url, now=started
+                )
+            finally:
+                try:
+                    await asyncio.shield(
+                        connection.execute(text("SELECT pg_advisory_unlock(86170421)"))
+                    )
+                except BaseException:
+                    # A pooled connection must never retain a scheduler lock.
+                    await connection.invalidate()
+                    raise
     except Exception as exc:
         # 예외를 삼키지 않는다 (CLAUDE.md §2 규칙 5). 다만 여기서 죽으면
         # 이후 모든 알림이 멈추므로, 로그를 남기고 다음 주기를 기다린다.

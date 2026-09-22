@@ -15,6 +15,9 @@ dependencies = [
     "apscheduler>=3.10,<4",
     "pywebpush>=2.0,<3",
     "requests>=2.32,<3",
+    # host_monitor 가 직접 임포트한다. pydantic-settings 를 통해 전이적으로 깔려 있지만,
+    # 그쪽이 의존을 바꾸면 호스트 감시만 조용히 죽는다 — 쓰는 쪽에서 선언한다.
+    "python-dotenv>=1.0,<2",
 ]
 
 [project.optional-dependencies]

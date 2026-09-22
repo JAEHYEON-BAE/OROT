@@ -33,3 +33,8 @@ out/
 # 에디터
 .idea/
 *.swp
+
+# Local preview and macOS metadata
+._*
+.mv_preview.html
+.playwright-mcp/

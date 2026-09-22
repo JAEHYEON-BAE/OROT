@@ -90,10 +90,8 @@ async def _linked_listing_exists(session: AsyncSession, release_id: int) -> bool
 
 
 async def _to_out(session: AsyncSession, release: Release) -> ReleaseAdminOut:
-    artist_name = None
-    if release.primary_artist_id is not None:
-        artist = await session.get(Artist, release.primary_artist_id)
-        artist_name = artist.name_display if artist else None
+    artist = release.primary_artist
+    artist_name = artist.name_display if artist else None
     return ReleaseAdminOut(
         can_delete=not release.is_published
         and not await _linked_listing_exists(session, release.id),
@@ -147,7 +145,7 @@ async def create_release(payload: ReleaseIn, session: SessionDep, _: AdminDep) -
     release = Release(
         title=payload.title.strip(),
         title_norm=normalize_name(payload.title),
-        primary_artist_id=artist.id if artist else None,
+        primary_artist=artist,
         label=payload.label,
         format=payload.format,
         variant=payload.variant,
@@ -238,7 +236,7 @@ async def update_release(
             continue
         if field == "artist_name":
             artist = await _get_or_create_artist(session, value) if value else None
-            release.primary_artist_id = artist.id if artist else None
+            release.primary_artist = artist
             continue
         setattr(release, field, value)
         if field == "title" and value:

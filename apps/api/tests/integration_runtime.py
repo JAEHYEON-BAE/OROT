@@ -2,18 +2,21 @@
 
 Run with venv/bin/python apps/api/tests/integration_runtime.py and DATABASE_URL set.
 CI runs this after migrations on disposable PostgreSQL; the default test suite excludes it.
-The checks use their own ORM-created schema, not the migrated schema directly.
+The checks apply the actual migration chain in their own schema and roll it back.
 """
 
 import asyncio
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+from alembic import command
+from alembic.config import Config
 from orot_core.db import get_engine
 from orot_core.enums import DeliveryStatus, EventType
-from orot_core.models import Base, DeviceToken, ListingEvent, NotificationDelivery, Release
+from orot_core.models import Artist, DeviceToken, ListingEvent, NotificationDelivery, Release
 from orot_core.notifications import SendOutcome, SendResult, dispatch_pending, plan_deliveries
 from orot_core.schedule_events import generate_due_events
+from sqlalchemy import event as sa_event
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -316,6 +319,84 @@ async def schedule_modes(session):
     assert "notes" not in public.model_dump()
 
 
+async def sql_behavior(session):
+    # CHECK behavior cannot be inferred from a successful alembic check.
+    try:
+        async with session.begin_nested():
+            session.add(
+                Release(
+                    title="invalid TBA",
+                    title_norm="invalid TBA",
+                    schedule_status="TBA",
+                    release_date=date.today(),
+                )
+            )
+            await session.flush()
+    except IntegrityError:
+        pass
+    else:
+        raise AssertionError("migrated TBA CHECK must reject dates")
+
+    now = datetime.now(UTC)
+    for i in range(30):
+        session.add(
+            Release(
+                title=f"artist audit {i}",
+                title_norm=f"artist audit {i}",
+                is_published=True,
+                primary_artist=Artist(name_display=f"artist {i}", name_norm=f"artist {i}"),
+            )
+        )
+    await session.flush()
+    session.expunge_all()
+    statements = []
+    bind = session.get_bind()
+
+    def count(connection, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    sa_event.listen(bind, "before_cursor_execute", count)
+    try:
+        releases = list(await session.scalars(select(Release)))
+        from orot_api.serializers import release_to_out
+
+        output = [await release_to_out(session, release) for release in releases]
+        assert len(output) == 30 and all(row.artist_name for row in output)
+        assert len(statements) <= 3, f"artist N+1: {len(statements)} queries"
+    finally:
+        sa_event.remove(bind, "before_cursor_execute", count)
+
+    release = releases[0]
+    earlier = ListingEvent(release_id=release.id, event_type="SCHEDULE_ADDED", occurred_at=now)
+    latest = ListingEvent(release_id=release.id, event_type="PREORDER_OPEN", occurred_at=now)
+    session.add_all([earlier, latest])
+    await session.flush()
+    from orot_api.feed_query import latest_event_per_release
+
+    rows = (await session.execute(latest_event_per_release(50))).all()
+    assert len(rows) == 1 and rows[0][0].id == latest.id
+    latest.superseded_at = now
+    await session.flush()
+    rows = (await session.execute(latest_event_per_release(50))).all()
+    assert rows[0][0].id == earlier.id
+    token = DeviceToken(platform="WEB", token="https://example.invalid/cascade")
+    session.add(token)
+    await session.flush()
+    delivery = NotificationDelivery(event_id=earlier.id, device_token_id=token.id)
+    session.add(delivery)
+    await session.flush()
+    delivery_id = delivery.id
+    await session.delete(earlier)
+    await session.flush()
+    assert (
+        await session.scalar(
+            select(NotificationDelivery.id).where(NotificationDelivery.id == delivery_id)
+        )
+        is None
+    )
+
+
 async def main():
     engine = get_engine()
     schema = "audit_" + uuid4().hex
@@ -323,10 +404,25 @@ async def main():
         transaction = await conn.begin()
         try:
             await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+            # Exclude public here: otherwise Alembic can read the host version table
+            # and skip migrations, or tests can accidentally touch host tables.
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+
+            def migrate(connection):
+                config = Config("alembic.ini")
+                config.attributes["connection"] = connection
+                command.upgrade(config, "head")
+
+            # pg_trgm operators installed in public must remain resolvable. A local
+            # version table shadows public's version table before adding public.
+            await conn.execute(
+                text("CREATE TABLE alembic_version (version_num varchar(32) NOT NULL PRIMARY KEY)")
+            )
             await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
-            await conn.run_sync(lambda c: Base.metadata.create_all(c, checkfirst=False))
+            await conn.run_sync(migrate)
             assert await conn.scalar(text("SELECT current_schema()")) == schema
             cases = [
+                ("migration CHECK, eager artists, DISTINCT ON and CASCADE", sql_behavior),
                 ("retry/idempotency", retry),
                 ("retry exhaustion", exhausted_retries),
                 ("sender exception isolation", sender_exception),

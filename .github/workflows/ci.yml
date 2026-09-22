@@ -61,8 +61,16 @@ jobs:
         run: make test
       - name: Apply migrations to disposable database
         run: venv/bin/python -m alembic upgrade head
-      - name: PostgreSQL integration checks (fake sender, schema rollback)
-        run: venv/bin/python apps/api/tests/integration_runtime.py
+      - name: Check migration and ORM drift
+        run: venv/bin/python -m alembic check
+      - name: Check OpenAPI snapshot
+        run: |
+          make openapi
+          git diff --exit-code -- docs/api/openapi.json
+      - name: PostgreSQL integration checks (migrations, fake sender, schema rollback)
+        run: |
+          venv/bin/python apps/api/tests/integration_runtime.py
+          venv/bin/python apps/api/tests/integration_dispatch.py
 
   web:
     name: Web checks
@@ -90,3 +98,31 @@ jobs:
         run: node --test tests/*.test.mjs
       - name: Production build
         run: npm run build
+
+  mobile:
+    name: Mobile checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: apps/mobile/.nvmrc
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - name: Install mobile packages
+        run: npm ci
+      - name: Lint, type checks and offline tests
+        run: npm run check
+      - name: Check generated API types
+        run: |
+          npm run generate:api
+          git diff --exit-code -- src/lib/api/schema.ts

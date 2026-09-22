@@ -1,6 +1,6 @@
 # OROT — 바이닐 발매·예약 일정 서비스 청사진 (한국어판)
 
-> **기준일: 2026-09-11 · 버전 1.1.0**. 현재 구현은 소스·마이그레이션·실행 설정을 기준으로 설명한다.
+> **기준일: 2026-09-15 · 버전 1.1.0**. 현재 구현은 소스·마이그레이션·실행 설정을 기준으로 설명한다.
 > 문서와 구현이 충돌하면 구현을 우선하여 문서를 갱신한다. 미구현 계획은 현재 동작이나 자동 실행 지시가 아니다.
 > [영어판](BLUEPRINT.en.md)과 함께 유지하며, 두 판의 설명이 충돌하면 한국어판을 먼저 바로잡고 번역한다.
 
@@ -532,7 +532,10 @@ CREATE INDEX ON notification_deliveries (status, created_at);
 | 3회 연속 크롤에서 URL 404/미발견 | `DELISTED` |
 
 우선순위 큐·일일 요약은 미구현이다. 현재 M2는 모든 알림 대상 이벤트를 같은 60초 tick에서 처리하며,
-PENDING을 FAILED 재시도보다 먼저, 배송 생성 시각/ID 오름차순으로 최대 500건 처리한다.
+계획에서는 PREORDER_OPEN을 우선하고, 발송에서는 PENDING → FAILED 순서 안에서 PREORDER_OPEN → 생성 시각/ID 순으로 최대 500건을 선택한다.
+계획과 결과를 별도 커밋하고 HTTP 중에는 트랜잭션을 유지하지 않는다. 최대 5건 병렬, 같은 구독은 순차 처리하며 45초 이후 새 발송을 시작하지 않는다.
+프로세스 간 세션 advisory lock을 유지한다. 크래시 때 이미 커밋한 배송은 보존되지만 진행 중인 최대 5건의 외부 수락/커밋 공백은 남는다.
+500건 상한과 지연은 그대로 용량 제한이므로 대규모 공개 전 부하 검증이 필요하다.
 
 > 위 표는 **자동 수집(M3)** 이 붙은 뒤의 diff 규칙입니다. 현재(M2)는 운영자가 시각을
 > 직접 입력하므로 diff 엔진이 필요 없고, 아래 시각 기반 규칙만 동작합니다.
@@ -743,7 +746,7 @@ migrations/versions/ / alembic.ini
 infra/{env-backup,env-restore,orot-start,orot-backup}.sh
 docs/{BLUEPRINT.ko,BLUEPRINT.en}.md / docs/{adapters,adr}/
 docs/api/openapi.json / docs/{security-review,runtime-review,documentation-review}.md
-.github/workflows/ci.yml            # T-012 Python + web verification
+.github/workflows/ci.yml            # T-012 Python + web + mobile verification
 backups/                           # ignored runtime artifacts
 venv/                              # ignored local Python environment
 ```
@@ -836,13 +839,16 @@ make seed        # sources만 시드; 별칭은 미구현
 | 항목 | 개발 `make up` | 공개 테스트 `make prod` |
 |---|---|---|
 | 웹 | next dev, 소스 마운트 | 빌드 이미지 + next start, 웹 마운트 제거 |
-| API | 소스 마운트 + uvicorn --reload | 동일한 마운트/--reload 유지, ENVIRONMENT=production |
-| collector | 소스 마운트, scheduler 실행, 자동 리로드 없음 | 동일, ENVIRONMENT=production |
+| API | 소스 마운트 + uvicorn --reload | 이미지 소스 사용, --reload·소스 마운트 제거, ENVIRONMENT=production |
+| collector | 소스 마운트, scheduler 실행, 자동 리로드 없음 | 이미지 소스 사용, 소스 마운트 제거, ENVIRONMENT=production |
 | DB·포트 | postgres_data 볼륨, 5432/8000/3000 loopback 바인딩 | 동일 |
 
-API Python 편집은 리로드된다. collector Python 편집은 `docker compose restart collector`가 필요하다.
-production 웹 편집과 의존성 변경은 재빌드한다. `.env`/Compose 환경 변수 변경은 `make prod` 또는
+개발 모드의 API Python 편집은 리로드되고 collector 편집은 재시작이 필요하다.
+production의 API·collector·웹 코드와 의존성 변경은 `make prod`로 재빌드한다. `.env`/Compose 환경 변수 변경은 `make prod` 또는
 동일 오버레이의 `up -d`로 컨테이너를 재생성해야 한다. `restart`만으로 환경 변수를 바꾸지 못한다.
+소스 마운트 제거는 `./migrations`에도 적용된다. 운영 모드의 `make migrate`는 이미지에 포함된 리비전까지만
+적용하므로 새 리비전은 `make prod` 재빌드 후에 적용하고, `make revision`은 파일이 컨테이너 안에만 남아
+사라지므로 개발 모드에서 실행한다.
 
 | 환경 변수 | 소비자·용도 |
 |---|---|
@@ -933,12 +939,17 @@ Slack 실패 후 소진 경보를 보존·재전송하는 큐는 없다.
 `T-012`의 `.github/workflows/ci.yml`은 모든 PR, main push, 수동 실행을 지원한다.
 Python 3.12 작업은 `make install`, `make lint`, `make test` 후 임시 PostgreSQL 16에
 `venv/bin/python -m alembic upgrade head`를 적용하고
-`venv/bin/python apps/api/tests/integration_runtime.py`로 9개 격리 시나리오와 스키마 롤백을 검증한다.
-통합 시나리오는 ORM으로 만든 별도 스키마에서 실행하며, 마이그레이션 결과를 직접 사용하는 검증은 아니다.
-Node 22 작업은 `npm ci`, 웹 lint·Node 회귀 테스트·production build를 실행한다.
+`alembic check`로 감지 가능한 ORM 드리프트를 확인하고 OpenAPI 재생성 차이를 검사한다.
+`integration_runtime.py`는 실제 마이그레이션으로 만든 별도 스키마에서 시나리오를 실행하고 롤백한다.
+`integration_dispatch.py`는 별도 UUID 스키마에서 실제 커밋·병렬 발송·중단 복구를 가짜 sender로 검사하고 그 스키마만 제거한다.
+CHECK 제약 변경 등 autogenerate가 감지하지 못하는 항목은 별도 DB 동작 검증이 필요하다.
+Node 22 웹 작업은 `npm ci`, lint·Node 회귀 테스트·production build를 실행한다.
+별도 모바일 작업은 고정 Node 버전으로 `npm ci`, `npm run check`, `generate:api` 후 타입 diff 검사를 실행한다.
 작업별 제한은 15분이며 같은 ref의 이전 실행은 취소한다. 저장소 권한은 `contents: read`이고
 운영 비밀·DB·실제 알림 발송을 사용하지 않는다. GitHub 실행 결과와 필수 체크 지정은 저장소에서 별도 확인한다.
 GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose를 사용한다.
+
+호스트 감시·재시도·백업 성공 기록 구현 및 등록 절차는 [운영 보강 안내](operations-reliability.ko.md)를 따른다. 설정 파일 존재가 실제 launchd 등록·Slack 수신·외부 백업 성공을 뜻하지 않는다.
 
 ### 9.6 비용과 운영 범위
 
@@ -975,7 +986,7 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-009 | `pipeline.py`: RawItem → listings upsert (병합 없이 release 1:1 생성) | `collector run --source gimbab` 후 DB에 행 적재 |
 | T-010 | `GET /v1/releases` (커서 페이지네이션) | OpenAPI 문서 노출, 실데이터 반환 |
 | T-011 | Next.js 피드 화면 (SSR, 필터 없음) | `localhost:3000` 에서 목록 렌더링 |
-| T-012 | GitHub Actions CI (Python·웹·PostgreSQL 통합 검증) | PR/main push에서 두 작업 실행; lint·테스트·마이그레이션·웹 build 실패 시 해당 작업 실패 (§9.5) |
+| T-012 | GitHub Actions CI (Python·웹·모바일·PostgreSQL 통합 검증) | PR/main push에서 세 작업 실행; lint·테스트·마이그레이션·웹 build 실패 시 해당 작업 실패 (§9.5) |
 | **M0 마감 범위** | 스캐폴딩·스키마·수집 부품까지 완료. 수집 → DB → 웹 연결은 보류 | |
 
 ### M1 — 수동 등록 → 공개 피드 ([ADR-0005](adr/0005-manual-curation-first.md))
@@ -992,7 +1003,7 @@ GHCR push·SSH 배포·자동 롤백은 미구현이며 운영 기동은 Compose
 | T-106 | `GET /v1/feed` — 예약 시작 임박순 타임라인 | 이벤트·일정 혼합 정렬 |
 | T-107 | `GET /v1/releases.ics` (iCalendar) | 실제 캘린더 앱에서 구독 확인 |
 | T-108 | `GET /v1/feed.rss` (RSS 2.0) | 리더에서 구독 확인 |
-| T-109 | 운영자 등록 화면 (웹, 최소 폼) | 브라우저에서 일정 등록 완료 |
+| T-109 | 운영자 등록 화면 (웹, 최소 폼) | 브라우저 등록; 발매일 미정·판매 중·매진 시까지 토글 및 날짜 비활성화(2026-09-14 확장) |
 | T-110 | 사용자 피드·캘린더 화면 (Next.js SSR) | `localhost:3000` 에서 월간 그리드 렌더링 |
 
 ### M2 — 시각 기반 알림
@@ -1075,7 +1086,7 @@ T-034 공통 테마(`apps/mobile/theme.ts`)와 테마 텍스트 컴포넌트를 
 | T-042 | 권한·알림 탭 이동 | foreground/background/cold start·잘못된 payload 실기기 검증 |
 | T-043 | 최초 전체 일정 알림 on/off; 일간 요약 보류 | OS 권한과 서버 등록 상태 동기화 |
 
-세부 순서는 [모바일 블루프린트 §10](MOBILE_BLUEPRINT.ko.md)을 따른다. M3/M4보다 먼저 진행할 수 있다. T-012에 모바일 검사를 확장한다. 기존 ID 유지가 구현 완료 또는 보류 항목 완료를 의미하지 않는다.
+세부 순서는 [모바일 블루프린트 §10](MOBILE_BLUEPRINT.ko.md)을 따른다. M3/M4보다 먼저 진행할 수 있다. T-012에 모바일 검사와 생성 타입 drift 검사를 추가했다. 기존 ID 유지가 구현 완료 또는 보류 항목 완료를 의미하지 않는다.
 
 ### M7 — 운영 강화
 

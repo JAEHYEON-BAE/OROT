@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { apiBase, type Release } from "@/lib/api";
+import { onSaleStatus } from "@/lib/feed-display";
 import { formatDate, formatDateTime, relativeFromNow, releaseLabel } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,9 @@ export default async function ReleasePage({ params }: { params: Promise<{ id: st
   if (release.label) rows.push(["레이블", release.label]);
   if (release.variant) rows.push(["바리언트", release.variant]);
   if (release.schedule_status === "TBA") rows.push(["일정", "발매일 미정"]);
-  if (release.schedule_status === "ON_SALE") rows.push(["판매 상태", release.preorder_closes_at && Date.now() >= Date.parse(release.preorder_closes_at) ? "판매 종료" : "판매 중"]);
+  // 판정을 여기서 다시 쓰지 않는다 — 피드와 같은 함수를 써야 두 화면이 같은 말을 한다.
+  if (release.schedule_status === "ON_SALE")
+    rows.push(["판매 상태", onSaleStatus(release.preorder_closes_at)]);
   if (release.until_sold_out) rows.push(["종료 조건", "매진 시까지"]);
   if (release.preorder_opens_at)
     rows.push([

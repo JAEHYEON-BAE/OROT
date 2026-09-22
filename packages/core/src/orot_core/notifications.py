@@ -8,19 +8,21 @@
 의존성이고 `packages/core` 는 그쪽을 임포트할 수 없다 (의존 방향).
 """
 
-from dataclasses import dataclass
+import asyncio
+import time
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final, Protocol
 from urllib.parse import urlparse
 
 import structlog
-from sqlalchemy import case, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import Select, case, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from orot_core.enums import DeliveryStatus, DevicePlatform, EventType
-from orot_core.models import Artist, DeviceToken, ListingEvent, NotificationDelivery, Release
+from orot_core.models import DeviceToken, ListingEvent, NotificationDelivery, Release
 
 log = structlog.get_logger(__name__)
 
@@ -42,6 +44,8 @@ MAX_NOTIFY_AGE: Final = timedelta(hours=48)
 # 한 번의 실행에서 만들 최대 배송 수. 폭주를 막는 안전장치.
 MAX_BATCH: Final = 500
 MAX_ATTEMPTS: Final = 3
+SEND_CONCURRENCY: Final = 5
+DISPATCH_SECONDS: Final = 45.0
 # Retry windows are measured from delivery creation; each scheduler tick sends once.
 RETRY_DELAYS: Final = (timedelta(minutes=1), timedelta(minutes=5))
 
@@ -222,7 +226,11 @@ async def plan_deliveries(
                 Release.is_published.is_(True),
                 ListingEvent.release_id.is_not(None),
             )
-            .order_by(ListingEvent.occurred_at.asc())
+            .order_by(
+                case((ListingEvent.event_type == EventType.PREORDER_OPEN.value, 0), else_=1),
+                ListingEvent.occurred_at.asc(),
+                ListingEvent.id.asc(),
+            )
         )
     )
     if not events:
@@ -284,118 +292,183 @@ async def dispatch_pending(
     moment = now or datetime.now(UTC)
     planned = len(await plan_deliveries(session, now=moment))
 
-    pending = list(
-        await session.scalars(
-            select(NotificationDelivery)
-            .where(
-                or_(
-                    NotificationDelivery.status == DeliveryStatus.PENDING.value,
-                    (NotificationDelivery.status == DeliveryStatus.FAILED.value)
-                    & (NotificationDelivery.attempts < MAX_ATTEMPTS)
-                    & (
-                        NotificationDelivery.created_at
-                        <= case(
-                            (NotificationDelivery.attempts <= 1, moment - RETRY_DELAYS[0]),
-                            else_=moment - RETRY_DELAYS[1],
-                        )
-                    ),
-                )
-            )
-            .order_by(
-                case((NotificationDelivery.status == DeliveryStatus.PENDING.value, 0), else_=1),
-                NotificationDelivery.created_at.asc(),
-                NotificationDelivery.id.asc(),
-            )
-            .with_for_update(skip_locked=True)
-            .limit(MAX_BATCH)
-        )
-    )
-
-    sent = failed = expired = exhausted = deactivated = 0
+    pending = list(await session.scalars(_pending_query(moment)))
+    results = [DispatchResult(planned=planned)]
     for delivery in pending:
-        event = await session.get(
-            ListingEvent,
-            delivery.event_id,
-            options=[selectinload(ListingEvent.release)],
-            populate_existing=True,
-        )
-        subscription = await session.get(
-            DeviceToken, delivery.device_token_id, populate_existing=True
-        )
-        if event is None or subscription is None or event.release is None:
-            delivery.status = DeliveryStatus.EXPIRED
-            delivery.last_error = "이벤트 또는 구독을 찾을 수 없음"
-            expired += 1
-            continue
-
-        if (
-            event.superseded_at is not None
-            or not event.release.is_published
-            or not subscription.is_active
-            or event.occurred_at < moment - MAX_NOTIFY_AGE
-            or event.occurred_at < subscription.created_at
-        ):
-            delivery.status = DeliveryStatus.EXPIRED
-            delivery.last_error = "일정 무효화, 공개 취소, 구독 해지 또는 발송 기한 초과"
-            expired += 1
-            continue
-
-        artist_name = None
-        if event.release.primary_artist_id is not None:
-            artist = await session.get(Artist, event.release.primary_artist_id)
-            artist_name = artist.name_display if artist else None
-
-        payload = build_payload(event, event.release, artist_name, base_url)
-        delivery.attempts += 1
-        try:
-            send_result = await sender.send(subscription, payload)
-        except Exception as exc:
-            # A broken sender must not roll back earlier successful deliveries.
-            log.exception("push.sender_failed", delivery_id=delivery.id)
-            send_result = SendResult(SendOutcome.FAILED, type(exc).__name__)
-
-        if send_result.outcome is SendOutcome.SENT:
-            delivery.status = DeliveryStatus.SENT
-            delivery.sent_at = moment
-            delivery.last_error = None
-            subscription.last_success_at = moment
-            subscription.failure_count = 0
-            sent += 1
-        elif send_result.outcome is SendOutcome.GONE:
-            # 구독이 사라졌다. 재시도해도 소용없으므로 구독을 끈다.
-            delivery.status = DeliveryStatus.EXPIRED
-            delivery.last_error = send_result.error
-            if subscription.is_active:
-                subscription.is_active = False
-                deactivated += 1
-                log.info("push.subscription.expired", subscription_id=subscription.id)
-            expired += 1
-        else:
-            delivery.status = DeliveryStatus.FAILED
-            delivery.last_error = send_result.error
-            subscription.failure_count += 1
-            if delivery.attempts >= MAX_ATTEMPTS:
-                exhausted += 1
-                log.error("push.retry_exhausted", delivery_id=delivery.id)
-            failed += 1
-
+        results.append(await _send_one(session, sender, delivery, base_url=base_url, moment=moment))
     await session.flush()
-    result = DispatchResult(
-        planned=planned,
-        sent=sent,
-        failed=failed,
-        expired=expired,
-        exhausted=exhausted,
-        deactivated=deactivated,
-    )
-    if planned or sent or failed or expired:
-        log.info(
-            "notifications.dispatched",
-            planned=planned,
-            sent=sent,
-            failed=failed,
-            expired=expired,
-            exhausted=exhausted,
-            deactivated=deactivated,
+    return _sum_results(results)
+
+
+def _pending_query(moment: datetime) -> Select[tuple[NotificationDelivery]]:
+    return (
+        select(NotificationDelivery)
+        .join(ListingEvent, NotificationDelivery.event_id == ListingEvent.id)
+        .where(
+            or_(
+                NotificationDelivery.status == DeliveryStatus.PENDING.value,
+                (NotificationDelivery.status == DeliveryStatus.FAILED.value)
+                & (NotificationDelivery.attempts < MAX_ATTEMPTS)
+                & (
+                    NotificationDelivery.created_at
+                    <= case(
+                        (NotificationDelivery.attempts <= 1, moment - RETRY_DELAYS[0]),
+                        else_=moment - RETRY_DELAYS[1],
+                    )
+                ),
+            )
         )
-    return result
+        .order_by(
+            case((NotificationDelivery.status == DeliveryStatus.PENDING.value, 0), else_=1),
+            case((ListingEvent.event_type == EventType.PREORDER_OPEN.value, 0), else_=1),
+            NotificationDelivery.created_at.asc(),
+            NotificationDelivery.id.asc(),
+        )
+        .with_for_update(skip_locked=True, of=NotificationDelivery)
+        .limit(MAX_BATCH)
+    )
+
+
+def _sum_results(results: list[DispatchResult]) -> DispatchResult:
+    return DispatchResult(
+        **{
+            field.name: sum(getattr(r, field.name) for r in results)
+            for field in fields(DispatchResult)
+        }
+    )
+
+
+async def _send_one(
+    session: AsyncSession,
+    sender: PushSender,
+    delivery: NotificationDelivery,
+    *,
+    base_url: str,
+    moment: datetime,
+    durable: bool = False,
+) -> DispatchResult:
+    sent = failed = expired = exhausted = deactivated = 0
+    event = await session.get(
+        ListingEvent,
+        delivery.event_id,
+        options=[selectinload(ListingEvent.release)],
+        populate_existing=True,
+    )
+    subscription = await session.get(DeviceToken, delivery.device_token_id, populate_existing=True)
+    if event is None or subscription is None or event.release is None:
+        delivery.status = DeliveryStatus.EXPIRED
+        delivery.last_error = "이벤트 또는 구독을 찾을 수 없음"
+        expired += 1
+        return DispatchResult(expired=1)
+
+    if (
+        event.superseded_at is not None
+        or not event.release.is_published
+        or not subscription.is_active
+        or event.occurred_at < moment - MAX_NOTIFY_AGE
+        or event.occurred_at < subscription.created_at
+    ):
+        delivery.status = DeliveryStatus.EXPIRED
+        delivery.last_error = "일정 무효화, 공개 취소, 구독 해지 또는 발송 기한 초과"
+        expired += 1
+        return DispatchResult(expired=1)
+
+    artist = event.release.primary_artist
+    artist_name = artist.name_display if artist else None
+
+    payload = build_payload(event, event.release, artist_name, base_url)
+    if durable:
+        # Finish all reads before HTTP. expire_on_commit=False preserves the snapshot.
+        await session.commit()
+    try:
+        send_result = await sender.send(subscription, payload)
+    except Exception as exc:
+        # A broken sender must not roll back earlier successful deliveries.
+        log.error("push.sender_failed", delivery_id=delivery.id, error=type(exc).__name__)
+        send_result = SendResult(SendOutcome.FAILED, type(exc).__name__)
+
+    delivery.attempts += 1
+    if send_result.outcome is SendOutcome.SENT:
+        delivery.status = DeliveryStatus.SENT
+        delivery.sent_at = moment
+        delivery.last_error = None
+        subscription.last_success_at = moment
+        subscription.failure_count = 0
+        sent += 1
+    elif send_result.outcome is SendOutcome.GONE:
+        # 구독이 사라졌다. 재시도해도 소용없으므로 구독을 끈다.
+        delivery.status = DeliveryStatus.EXPIRED
+        delivery.last_error = send_result.error
+        if subscription.is_active:
+            subscription.is_active = False
+            deactivated += 1
+            log.info("push.subscription.expired", subscription_id=subscription.id)
+        expired += 1
+    else:
+        delivery.status = DeliveryStatus.FAILED
+        delivery.last_error = send_result.error
+        subscription.failure_count += 1
+        if delivery.attempts >= MAX_ATTEMPTS:
+            exhausted += 1
+            log.error("push.retry_exhausted", delivery_id=delivery.id)
+        failed += 1
+
+    return DispatchResult(
+        sent=sent, failed=failed, expired=expired, exhausted=exhausted, deactivated=deactivated
+    )
+
+
+async def dispatch_committed(
+    factory: async_sessionmaker[AsyncSession],
+    sender: PushSender,
+    *,
+    base_url: str,
+    now: datetime | None = None,
+) -> DispatchResult:
+    """Runtime dispatch under the scheduler's session advisory lock.
+
+    Planning and each result are committed separately. HTTP holds no transaction.
+    At most five sends are in flight; start new work only within a 45-second budget.
+    Each subscription is handled serially, preserving GONE and failure counters.
+    A crash can still repeat in-flight accepted pushes, not the completed batch.
+    """
+    moment = now or datetime.now(UTC)
+    deadline = time.monotonic() + DISPATCH_SECONDS
+    async with factory() as session:
+        planned = len(await plan_deliveries(session, now=moment))
+        pending = list(await session.scalars(_pending_query(moment)))
+        groups: dict[int, list[int]] = {}
+        for delivery in pending:
+            groups.setdefault(delivery.device_token_id, []).append(delivery.id)
+        await session.commit()
+    results = [DispatchResult(planned=planned)]
+    semaphore = asyncio.Semaphore(SEND_CONCURRENCY)
+
+    async def send_group(ids: list[int]) -> None:
+        for delivery_id in ids:
+            async with semaphore:
+                if time.monotonic() >= deadline:
+                    return
+                async with factory() as session:
+                    delivery = await session.get(NotificationDelivery, delivery_id)
+                    if delivery is None or delivery.status in (
+                        DeliveryStatus.SENT,
+                        DeliveryStatus.EXPIRED,
+                    ):
+                        continue
+                    result = await _send_one(
+                        session,
+                        sender,
+                        delivery,
+                        base_url=base_url,
+                        moment=datetime.now(UTC),
+                        durable=True,
+                    )
+                    await session.commit()
+                    results.append(result)
+
+    # TaskGroup waits/cancels all siblings before the scheduler can release its lock.
+    async with asyncio.TaskGroup() as tasks:
+        for ids in groups.values():
+            tasks.create_task(send_group(ids))
+    return _sum_results(results)

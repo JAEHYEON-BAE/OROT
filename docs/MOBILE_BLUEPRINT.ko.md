@@ -493,7 +493,7 @@ npm test -- --runInBand
 
 서버 변경은 루트 `make lint`, `make test`, disposable DB migration 검증을 실행한다. API 계약 변경은 `make openapi`. 웹 프록시 변경은 `apps/web`에서 `npm run lint`, `node --test tests/*.test.mjs`, `npm run build`를 실행한다. 기존 Python 통합 테스트는 `venv/bin/python apps/api/tests/integration_runtime.py`이며 새 모바일 시나리오는 별도로 추가해야 한다.
 
-T-012 CI를 확장해 mobile lint/typecheck/test·생성 타입 drift 검사를 추가한다. iOS 컴파일은 별도 macOS runner 또는 수동/EAS build로 확인한다. Linux의 TypeScript 통과를 iOS 컴파일 성공으로 표현하지 않는다. PR CI에 Apple·Expo production 비밀이나 실기기 토큰을 넣지 않는다.
+T-012 CI에 mobile lint/typecheck/test·생성 타입 drift 검사를 추가했다(2026-09-15). iOS 컴파일은 별도 macOS runner 또는 수동/EAS build로 확인한다. Linux의 TypeScript 통과를 iOS 컴파일 성공으로 표현하지 않는다. PR CI에 Apple·Expo production 비밀이나 실기기 토큰을 넣지 않는다.
 
 ### 9.3 더미 일정 + 실제 푸시 리허설
 

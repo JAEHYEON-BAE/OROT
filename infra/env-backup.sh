@@ -13,6 +13,7 @@
 # 같은 디스크에 있으므로, **복구용 암호는 반드시 비밀번호 관리자에도 따로** 두어야
 # 한다. 키체인은 무인 실행을 위한 것이지 복구 수단이 아니다.
 set -euo pipefail
+umask 077
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
@@ -51,7 +52,7 @@ resolve_passphrase() {
     printf '%s' "$ENV_BACKUP_PASSPHRASE"; return 0
   fi
   security find-generic-password -s "$KEYCHAIN_SERVICE" -w 2>/dev/null && return 0
-  die "암호를 찾지 못했습니다. 'make backup-env-setup' 을 먼저 실행하십시오."
+  die "암호를 읽을 수 없습니다. 키체인 잠금·접근 권한을 확인하고, 항목이 없을 때만 'make backup-env-setup' 을 실행하십시오."
 }
 
 # 다른 곳(Makefile 등)이 같은 규칙으로 경로를 다시 구현하지 않도록,
@@ -71,21 +72,23 @@ case "$(cd "$DEST" && pwd)" in
 esac
 
 newest="$(ls -1t "$DEST"/*.env.enc 2>/dev/null | head -1 || true)"
-if [ -n "$newest" ] && [ ! "$SOURCE" -nt "$newest" ]; then
-  log "$SOURCE 가 마지막 백업 이후 바뀌지 않았습니다 — 건너뜁니다 ($(basename "$newest"))"
+verify_backup() {
+  resolve_passphrase | openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -md sha512 \
+    -in "$1" -pass fd:0 2>/dev/null | cmp -s "$SOURCE" -
+}
+if [ -n "$newest" ] && verify_backup "$newest"; then
+  log "현재 파일과 암호화 백업의 복호화 결과가 일치합니다 — 재사용"
   exit 0
 fi
-
-out="$DEST/env-$(date +%Y%m%d-%H%M%S).env.enc"
-# -pass fd:3 — 명령행이나 환경변수로 넘기면 프로세스 목록에 노출될 수 있다.
+out="$(mktemp "$DEST/env-$(date +%Y%m%d-%H%M%S)-XXXXXX")"
+trap 'rm -f "$out"' EXIT
 if ! resolve_passphrase | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha512 \
        -salt -in "$SOURCE" -out "$out" -pass fd:0; then
-  rm -f "$out"; die "암호화에 실패했습니다."
+  die "암호화에 실패했습니다."
 fi
-chmod 600 "$out"
-[ -s "$out" ] || { rm -f "$out"; die "백업이 비어 있습니다."; }
-
-log "저장됨: $out ($(du -h "$out" | cut -f1))"
+[ -s "$out" ] && verify_backup "$out" || die "백업 복호화 검증 실패"
+mv "$out" "$out.env.enc"
+log "저장 및 복호화 검증 완료: $out.env.enc"
 
 # 오래된 것 정리. 작은 파일이라 넉넉히 남긴다.
 ls -1t "$DEST"/*.env.enc 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r f; do

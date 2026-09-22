@@ -3,7 +3,7 @@
 `notes` 는 운영자 메모이므로 **공개 응답에 절대 넣지 않는다.**
 """
 
-from orot_core.models import Artist, Release
+from orot_core.models import Release
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orot_api.schemas.release import ReleaseLinkOut, ReleaseOut
@@ -11,10 +11,8 @@ from orot_api.schemas.release import ReleaseLinkOut, ReleaseOut
 
 async def release_to_out(session: AsyncSession, release: Release) -> ReleaseOut:
     """`Release` 를 공개 응답으로 바꾼다."""
-    artist_name = None
-    if release.primary_artist_id is not None:
-        artist = await session.get(Artist, release.primary_artist_id)
-        artist_name = artist.name_display if artist else None
+    artist = release.primary_artist
+    artist_name = artist.name_display if artist else None
     return ReleaseOut(
         id=release.id,
         title=release.title,

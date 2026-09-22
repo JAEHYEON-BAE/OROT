@@ -12,10 +12,14 @@ services:
     # `local` 이 아니면 settings.py 가 기본 운영자 키를 거부한다.
     environment:
       ENVIRONMENT: production
+      WATCHFILES_FORCE_POLLING: "false"
+    command: ["uvicorn", "orot_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: !reset []
 
   collector:
     environment:
       ENVIRONMENT: production
+    volumes: !reset []
 
   web:
     build:

@@ -61,7 +61,7 @@ count as implemented behavior or authorize incidental implementation.
 ```bash
 make up          # start the local stack (postgres, api, collector, web)
 make down
-make migrate     # alembic upgrade head
+make migrate     # alembic upgrade head (production runs the image's copy — see below)
 make seed        # seed sources only; artist aliases remain planned
 make test        # pytest across packages/core, apps/api, apps/collector
 make lint        # ruff check + ruff format --check + mypy
@@ -129,10 +129,11 @@ feat(collector): T-014 implement Secondtrack adapter
 fix(core): T-020 prevent merge across differing variants
 docs(blueprint): T-006 record Gimbab robots.txt and selectors
 ```
-Types: `feat`, `fix`, `docs`, `test`, `chore`, `refactor`. Scopes: `core`, `collector`, `api`, `web`, `ios`, `infra`, `blueprint`.
+Types: `feat`, `fix`, `docs`, `test`, `chore`, `refactor`. Scopes: `core`, `collector`, `api`, `web`, `mobile`, `ios`, `infra`, `blueprint`.
+Use an existing task ID for backlog work; maintenance commits may omit it. Do not rewrite past history merely to rename commit subjects.
 
 ### Generated code
-- `make openapi` generates `docs/api/openapi.json` from FastAPI. Mobile generates types with `npm run generate:api` using openapi-typescript; HTTP calls and runtime validation are handwritten. Web types remain handwritten; generated-type CI and Swift clients are not implemented.
+- `make openapi` generates `docs/api/openapi.json` from FastAPI. Mobile generates types with `npm run generate:api` using openapi-typescript; HTTP calls and runtime validation are handwritten. Web types remain handwritten; CI checks generated mobile types and OpenAPI drift. Swift clients are not implemented.
 
 ---
 
@@ -164,10 +165,11 @@ If the site requires login, blocks bots, or its ToS prohibits automated access: 
 
 ## 7. Current state
 
-Reviewed against the working tree on **2026-09-11**. This describes implementation, not a guarantee
+Reviewed against the working tree on **2026-09-15**. This describes implementation, not a guarantee
 that host services are currently running. See [runtime review](docs/runtime-review.md) for the dated
 2026-09-10 validation and [documentation review](docs/documentation-review.md) for reconciliation.
 
+- **Schedule modes and mobile theme:** explicit TBA/ON_SALE/until-sold-out modes and `apps/mobile/theme.ts` are implemented. See the blueprints and `apps/mobile/THEME.md`.
 - **M1 is implemented; M2 is active.** Operator-entered schedules, unified feed, calendar, RSS,
   iCalendar and anonymous Web Push are available. Automatic harvesting remains unwired until M3.
 - **Public testing uses the Mac mini and Tailscale Funnel** at
@@ -175,9 +177,9 @@ that host services are currently running. See [runtime review](docs/runtime-revi
   The configured public URL comes from `PUBLIC_WEB_URL`; host tunnel/startup registrations must
   be verified separately rather than inferred from this file.
 - **Execution:** `make up` starts development web; `make prod` overlays a built production web.
-  Both bind API, web and PostgreSQL to loopback. API retains source mounts and `--reload` in both
-  modes; collector retains source mounts but requires restart after Python edits. Production web
-  has no source mounts and requires rebuild after edits. Environment changes require recreation.
+  Both bind API, web and PostgreSQL to loopback. Production API, collector and web use image
+  source without mounts/reload; code changes require rebuild. Development retains source mounts.
+  Environment changes require recreation.
 - **Feed:** one row per published release; `recent` means `updated_at` descending (최근 변경순),
   `imminent` means future starts first, past starts next, unknown last (발매 임박순).
   The web displays preorder opening time, falling back to release date, and computes status from
@@ -185,16 +187,17 @@ that host services are currently running. See [runtime review](docs/runtime-revi
 - **Admin:** key-validated login UI; schedule and full link-list updates are atomic. Unpublished
   releases can be deleted even after prior publication, unless linked listings or other references
   block deletion. Release events and their deliveries are removed with an authorized deletion.
-- **Notifications:** 60-second tick, transaction advisory lock across collectors, at most 500
-  deliveries per dispatch and three attempts per delivery. Failed retries become eligible one and
+- **Notifications:** 60-second tick, session advisory lock across collectors, at most 500
+  deliveries per dispatch, five concurrent sends, 45-second admission budget and three attempts per delivery.
+  Planning and individual results commit separately; HTTP holds no DB transaction. Failed retries become eligible one and
   five minutes after creation. Cancelled, superseded, inactive or stale deliveries expire before send.
   Release dates use KST midnight. Tags are `release-<id>-<event_type>`.
 - **T-116 완료:** 재시도 3회(1·5분), 404/410 시 구독 자동 비활성화, 그리고
   **Slack 운영자 알림**. 배송은 여전히 크래시 전후로 exactly-once 가 아니다.
 - **Tests:** Python pytest + Ruff + source/test mypy + core strict; web Node tests + ESLint + Next build. Optional
-  `apps/api/tests/integration_runtime.py` creates its own PostgreSQL schema and rolls it back,
+  `apps/api/tests/integration_runtime.py` migrates its own PostgreSQL schema and rolls it back,
   using a fake sender. T-012 `.github/workflows/ci.yml` runs Python checks, disposable PostgreSQL
-  migration/integration checks, and web checks on PR/main push/manual dispatch. No testcontainers
+  migration/integration and drift checks, web checks and mobile checks on PR/main push/manual dispatch. No testcontainers
   dependency exists. GitHub run results and required-check settings are verified separately.
 - **Preserve existing test/demo records and subscriptions.** Do not infer active counts, cleanup
   targets or deletion permission from old IDs in a document. Real `collector test-push` requires
@@ -399,14 +402,20 @@ out of enduring rules.
 - **`pip` + `pyproject.toml`** editable 설치. 가상환경은 `venv/`
 - **`PYTHONPYCACHEPREFIX=/tmp/pycache`** — 호스트 `__pycache__` 가 마운트로 들어와
   `EOFError: marshal data too short` 로 워커가 죽었다
-- **`WATCHFILES_FORCE_POLLING=true`** — virtiofs 는 inotify 를 전달하지 않아 `--reload` 가 안 먹는다
+- **개발 모드의 `WATCHFILES_FORCE_POLLING=true`** — virtiofs 는 inotify 를 전달하지 않아 `--reload` 가 안 먹는다
 - **웹은 Next.js 16.** `apps/web/AGENTS.md` 가 요구하는 대로 **코드를 쓰기 전에**
   `apps/web/node_modules/next/dist/docs/` 의 해당 문서를 읽는다 — 학습 데이터와 다르다
-- **컬렉터는 코드를 고쳐도 재기동해야 반영된다** (`docker compose restart collector`).
-  API 는 `--reload` 가 있지만 상주 스케줄러는 없다. `NOTIFIABLE` 에 종류를 추가했는데
+- **개발 모드의 컬렉터는 코드를 고쳐도 재기동해야 반영된다** (`docker compose restart collector`).
+  개발 API 는 `--reload` 가 있지만 상주 스케줄러는 없다. 운영 모드는 둘 다 재빌드해야 한다. `NOTIFIABLE` 에 종류를 추가했는데
   발송이 안 돼서 보니 프로세스가 **기동 시점 값**을 들고 있었다
 - **개발 웹만 `app`/`lib`/`public`/`next.config.ts` 를 마운트한다.**
   `compose.prod.yaml` 은 웹 마운트를 제거하므로 production 웹은 수정 후 재빌드해야 한다
+- **운영 모드에서는 마이그레이션도 이미지 내용이다.** `compose.prod.yaml` 이 api·collector 의
+  소스 마운트를 걷어내면서 `./migrations` 마운트도 함께 사라진다. 그래서 두 가지가 달라진다 —
+  `make migrate` 는 **마지막 `make prod` 빌드 시점까지의** 리비전만 적용하고(새 리비전은 재빌드 후),
+  `make revision` 은 **생성한 파일이 컨테이너 안에만 남아** 호스트에서 보이지 않고 컨테이너를
+  다시 만들면 사라진다. **리비전 생성은 개발 모드(`make up`)에서 한다.**
+  둘 다 오류를 내지 않고 조용히 어긋나므로 실행 전에 어느 모드인지 확인한다
 - **VAPID 키는 자체 생성** (`.env`). `VAPID_SUBJECT` 는 **요청에 함께 전송되는 값**이라
   사용자가 명시한 주소만 넣는다. 키가 없으면 푸시만 꺼지고 서버는 정상 기동
 - **`make backup` / `make restore`** (블루프린트 §9.3-1). 지우고 되살리는 것까지 시험 완료.

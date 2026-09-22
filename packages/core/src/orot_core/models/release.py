@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import (
     BigInteger,
@@ -22,6 +22,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from orot_core.enums import Curation
 from orot_core.models.base import Base
+
+if TYPE_CHECKING:
+    from orot_core.models.artist import Artist
 
 
 class Release(Base):
@@ -105,6 +108,10 @@ class Release(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    primary_artist: Mapped["Artist | None"] = relationship(
+        foreign_keys=[primary_artist_id], lazy="selectin"
     )
 
     links: Mapped[list["ReleaseLink"]] = relationship(

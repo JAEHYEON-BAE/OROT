@@ -67,7 +67,17 @@ healthz:  ## /healthz 200 확인 (T-001 인수 조건)
 	exit 1
 
 # ─── DB ────────────────────────────────────────────────────────
-migrate:  ## Alembic 마이그레이션 적용 (alembic upgrade head)
+#
+# **아래 타깃은 컨테이너 안의 `/app/migrations` 를 본다.**
+# 개발(`make up`)에서는 그것이 호스트 마운트라 호스트 파일과 같지만,
+# 운영(`make prod`)에서는 소스 마운트가 없어 **이미지에 구워진 사본**이다.
+# 그래서 운영 모드에서는:
+#   - `make migrate` 는 마지막 `make prod` 빌드 시점의 마이그레이션까지만 적용한다.
+#     새 리비전을 추가했다면 `make prod` 로 다시 빌드한 뒤에 적용한다.
+#   - **`make revision` 을 쓰지 않는다.** 생성된 파일이 컨테이너 안에만 남아
+#     호스트에서 보이지 않고, 컨테이너를 다시 만들면 사라진다.
+#     리비전 생성은 개발 모드(`make up`)에서 한다.
+migrate:  ## Alembic 마이그레이션 적용 (운영 모드는 이미지의 마이그레이션을 쓴다 — 위 주석)
 	$(API) alembic -c /app/alembic.ini upgrade head
 
 migrate-down:  ## 직전 마이그레이션 1단계 되돌리기
@@ -77,7 +87,7 @@ migrate-status:  ## 현재 리비전 및 이력
 	$(API) alembic -c /app/alembic.ini current
 	$(API) alembic -c /app/alembic.ini history --indicate-current
 
-revision:  ## 모델 변경분으로 리비전 자동 생성 (m="메시지")
+revision:  ## 모델 변경분으로 리비전 자동 생성 (m="메시지") — 개발 모드(make up)에서만
 	@test -n "$(m)" || { echo "사용법: make revision m=\"add xxx\""; exit 1; }
 	$(API) alembic -c /app/alembic.ini revision --autogenerate -m "$(m)"
 

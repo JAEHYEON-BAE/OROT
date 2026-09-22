@@ -7,7 +7,7 @@ const source = await readFile(new URL("../lib/feed-display.ts", import.meta.url)
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
-const { feedDisplay } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const { feedDisplay, onSaleStatus } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const release = {
   preorder_opens_at: "2026-09-11T13:00:00+09:00",
   preorder_closes_at: "2026-09-13T18:00:00+09:00",
@@ -46,4 +46,14 @@ test("explicit sale mode handles deadline and TBA", () => {
   assert.equal(feedDisplay(sale, Date.parse("2026-09-14")).status, "판매 종료");
   assert.equal(feedDisplay({ ...sale, preorder_closes_at: null, until_sold_out: true }, Date.parse("2027-01-01")).status, "판매 중");
   assert.equal(feedDisplay({ ...sale, schedule_status: "TBA" }, Date.now()).status, "발매일 미정");
+});
+
+test("sale status is shared by the feed and the detail page", () => {
+  // 상세 화면은 기준 시각을 서버에서 받지 못해 기본값을 쓴다. 같은 함수를 쓰는지만 고정한다.
+  const closing = Date.parse(release.preorder_closes_at);
+  assert.equal(onSaleStatus(release.preorder_closes_at, closing - 1), "판매 중");
+  assert.equal(onSaleStatus(release.preorder_closes_at, closing), "판매 종료");
+  assert.equal(onSaleStatus(null, Date.parse("2099-01-01")), "판매 중");
+  const sale = { ...release, preorder_opens_at: null, schedule_status: "ON_SALE" };
+  assert.equal(feedDisplay(sale, closing).status, onSaleStatus(release.preorder_closes_at, closing));
 });

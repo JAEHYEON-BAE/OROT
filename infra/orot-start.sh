@@ -24,12 +24,15 @@ fi
 log "스택을 상시 운영 모드로 올립니다"
 docker compose -f compose.yaml -f compose.prod.yaml up -d
 
-# 헬스체크가 통과할 때까지 기다린다. 실패해도 launchd 를 죽이지 않는다 —
-# 여기서 비정상 종료하면 launchd 가 반복 재시작을 시도해 로그만 쌓인다.
-for _ in $(seq 1 30); do
-  if curl -fsS -o /dev/null "http://127.0.0.1:${API_HOST_PORT:-8000}/healthz"; then
+# 정상 응답은 exit 0. 30회 모두 실패한 경우에만 launchd 재시도를 요청한다.
+for attempt in $(seq 1 30); do
+  if curl --max-time 3 -fsS -o /dev/null "http://127.0.0.1:${API_HOST_PORT:-8000}/healthz"; then
     log "healthz 200 — 기동 완료"
     exit 0
+  fi
+  if [ "$attempt" -eq 30 ]; then
+    log "healthz 검사 30회 실패 — launchd 재시도 요청"
+    exit 1
   fi
   sleep 2
 done

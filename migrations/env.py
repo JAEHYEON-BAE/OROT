@@ -63,5 +63,8 @@ async def run_migrations_online() -> None:
 
 if context.is_offline_mode():
     run_migrations_offline()
+elif config.attributes.get("connection") is not None:
+    # Integration checks run the real migration chain in an isolated transaction.
+    _do_run_migrations(config.attributes["connection"])
 else:
     asyncio.run(run_migrations_online())

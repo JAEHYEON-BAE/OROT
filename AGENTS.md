@@ -95,8 +95,8 @@ or rebuilding services. Python/web test suites are required for implementation c
 - Web API types in `apps/web/lib/api.ts` are handwritten today. OpenAPI is a
   generated snapshot; mobile generates TypeScript types with `npm run generate:api`
   in `apps/mobile`, while its HTTP client and runtime validation are handwritten.
-- `make prod` builds the web without source mounts. API still reloads mounted
-  Python source; collector requires restart after source edits. Environment
+- `make prod` builds API, collector and web without source mounts; production API
+  has no reload. All production code changes require rebuilding. Environment
   changes require container recreation, not only restart.
 - Keep blocking `pywebpush` calls off the async event loop. Never send real test
   notifications without the user's authorization.
