@@ -1,15 +1,16 @@
 # OROT — 혼자 만드는 Swift iOS 네이티브 앱 가이드
 
-> 작성일: 2026-09-22
+> 작성일·환경 재검토일: 2026-09-22
+> 개발 기준: macOS 27.0 + Xcode 27.0 + Apple Swift 6.4 + iOS 27 SDK
 > 대상: TypeScript·React 개발 경험이 있고 Swift·Xcode는 처음인 개발자
 > 목표: 기존 OROT 서버를 이용해 피드 → 상세 → 판매처 링크 → 알림 → 상세 이동을 직접 구현한다.
 > 문서 성격: 학습과 구현을 위한 제안서. 기존 Expo 앱, ADR, 블루프린트의 확정 상태를 변경하지 않는다.
 
-이 문서는 새 문서 한 개만 추가하는 요청에 맞춰 작성했다. 아래 폴더, Swift 파일, API 확장, Xcode 설정은 **앞으로 직접 만들 내용**이다. 이 문서 작성으로 앱 프로젝트나 네이티브 푸시가 생성되지는 않는다. 현재 저장소에는 다른 작업의 수정 사항이 있으므로, 실제 개발을 시작할 때도 변경 범위를 먼저 확인한다.
+이 문서는 새 문서 한 개만 추가하는 요청에 맞춰 작성했다. 아래 폴더, Swift 파일, API 확장, Xcode 설정은 **앞으로 직접 만들 내용**이다. 이 문서 작성으로 앱 프로젝트나 네이티브 푸시가 생성되지는 않는다. 실제 개발을 시작할 때는 `git status --short`로 다른 작업의 변경 여부부터 확인한다.
 
 처음부터 모든 항목을 이해할 필요는 없다. 1~6장을 읽고 개발 환경을 준비한 다음, 7~9장의 예제로 실제 목록과 상세를 띄워 본다. 그 뒤 일정 표시, 디자인, 캐시, 알림을 한 단계씩 보완한다. 각 단계 끝의 완료 기준을 통과하면 다음 단계로 넘어간다.
 
-**문서 검증 기록:** 7~8장의 최소 앱 Swift 파일 6개를 임시 디렉터리로 추출해 Xcode 27.0의 iOS Simulator SDK, Swift 6 모드, iOS 17 deployment target으로 `swiftc -typecheck`를 실행했고 통과했다. 로컬 문서 링크와 목차 연결도 확인했다. 이는 타입 검사이며 Xcode 프로젝트의 빌드·서명·Simulator 실행·실서버 연결·실기기 푸시 검증은 아니다. 후반부의 확장 예제와 테스트 예제는 이 6개 파일 검사에 포함되지 않는다.
+**문서 검증 기록:** Mac mini에서 macOS 27.0, Xcode 27.0, Swift 6.4, iOS Simulator 27.0 SDK를 확인했다. 7~8장의 최소 앱 Swift 파일 6개를 임시 디렉터리로 추출해 Swift 6 언어 모드·iOS 17 deployment target으로 타입 검사했고, 기본 격리 `MainActor` 및 관련 동시성 옵션을 적용한 검사도 통과했다. 최초 검사는 `swiftc` 기본값인 nonisolated였으므로, 이번 검토에서는 새 앱 템플릿의 설정 차이를 추가로 확인했다. 로컬 문서 링크와 목차 연결도 확인했다. 이는 타입 검사이며 Xcode 프로젝트 전체 빌드·서명·Device Hub에서 앱 실행·실서버 연결·실기기 푸시 검증은 아니다. MacBook Air의 설치 상태와 후반부 확장·테스트 예제의 실행 결과도 이 검사 범위에 포함하지 않는다.
 
 ## 목차
 
@@ -172,19 +173,45 @@ Swift 앱은 Mac mini의 DB에 직접 연결하지 않는다. `http://api:8000`�
 
 ## 4. Xcode 준비와 프로젝트 생성
 
-### 4.1 개발 환경 확인
+### 4.1 macOS 27·Xcode 27 개발 환경 확인
 
-Mac에는 Xcode와 필요한 iOS Simulator 런타임을 설치한다. 아래는 버전·경로를 읽는 명령이다.
+이 문서의 개발 컴퓨터 기준은 **macOS 27 + Xcode 27**이다. 사용자 환경에서는 MacBook Air에 이 개발 도구를 설치하고, Mac mini는 기존 서버를 실행한다. 아래 명령은 **SSH 접속 안쪽이 아닌 MacBook Air의 로컬 터미널**에서 실행한다. SSH 세션에서 실행하면 Mac mini의 버전이 나온다.
 
 ```sh
+sw_vers
 xcodebuild -version
 xcrun swift --version
 xcode-select -p
+xcodebuild -showsdks
 ```
 
-문서 작성 환경에서는 Xcode 27.0, Apple Swift 6.4가 확인되었다. 이는 이 Mac의 관찰값이며 모든 개발자의 필수 버전은 아니다. 설치 가능한 Xcode는 macOS 버전에 영향을 받고, App Store 업로드 요구 사항은 바뀔 수 있으므로 배포 시점에 공식 문서를 다시 확인한다.
+이번에 Mac mini에서 직접 확인한 환경은 다음과 같다. MacBook Air가 같은 상태라는 뜻은 아니므로 위 명령으로 별도 확인한다.
 
-이 가이드의 예제는 **iOS 17 이상**을 학습용 기준으로 삼는다. SwiftUI Observation을 사용하기 위한 기준이다. 실제 서비스의 최소 지원 버전이 확정되었다는 의미는 아니다. [Observation 지원 범위](https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app)
+| 구분 | 확인값 / 가이드 기준 |
+|---|---|
+| 개발 Mac의 OS | macOS 27.0, build `26A428` |
+| Xcode | 27.0, build `27A266a` |
+| Swift 컴파일러 | Apple Swift 6.4 |
+| 빌드에 사용하는 SDK | iOS 27.0 / iOS Simulator 27.0 |
+| 예제의 Swift 언어 모드 | Swift 6 (`SWIFT_VERSION = 6.0`) |
+| 앱의 최소 지원 iOS | 학습 예제는 17.0 유지 |
+| 최초 화면 검증 대상 | 설치 가능한 iOS 27 Simulator 권장 |
+
+**macOS 27은 개발 Mac의 OS이고, iOS 17은 앱을 설치할 수 있는 최소 버전이다.** 두 숫자를 같게 맞출 필요는 없다. Xcode 27·iOS 27 SDK로 빌드하면서 iOS 17부터 지원하는 것은 모순이 아니다. iOS 27에서만 제공되는 API를 추가할 때는 `if #available(iOS 27, *)`와 이전 버전의 대체 동작이 필요하다. 가이드의 현재 최소 앱 코드는 이를 요구하지 않는다.
+
+Apple의 Xcode 27 정식 릴리스 노트는 Swift 6.4와 27 계열 SDK를 안내하며, Xcode 실행 OS 요구는 macOS 26.6 이상으로 설명한다. 이 가이드는 사용자가 요청한 macOS 27 환경으로 범위를 좁힌 것이다. 검색 결과의 초기 beta 노트와 설치된 정식 버전의 요구를 섞지 않는다. [Xcode 27 릴리스 노트](https://developer.apple.com/documentation/xcode-release-notes/xcode-27-release-notes)
+
+최소 iOS 17은 Observation 사용을 위한 학습 기준이며 제품 정책을 확정하는 값은 아니다. [Observation 지원 범위](https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app)
+
+Xcode는 한 번 직접 실행해 초기 구성과 라이선스 안내를 완료한다. `xcode-select -p`가 `/Library/Developer/CommandLineTools`를 가리킨다면 전체 Xcode가 선택되지 않은 상태일 수 있다. 기본 위치에 설치했다면 다음으로 선택한다.
+
+```sh
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+```
+
+**Xcode → Settings → Components**에서 iOS 플랫폼과 Simulator 런타임을 다운로드한다. 과거 버전의 Platforms 메뉴 설명을 그대로 따라가지 않는다. SDK가 설치되어 있다는 사실만으로 Simulator 런타임도 준비된 것은 아니다. [추가 구성요소 설치](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)
+
+Xcode 27.1·27.2 beta를 이 문서 때문에 추가 설치할 필요는 없다. 여기서는 27.0을 기준으로 설명하며 배포 시점에는 App Store가 허용하는 Xcode·SDK를 다시 확인한다.
 
 ### 4.2 새 프로젝트 만들기
 
@@ -192,17 +219,35 @@ xcode-select -p
 2. iOS의 **App** 템플릿을 선택한다.
 3. Product Name은 `OROT`, Interface는 **SwiftUI**, Language는 **Swift**로 한다.
 4. Storage 선택이 있다면 첫 단계에서는 **None**으로 한다. SwiftData는 지금 필요하지 않다.
-5. 테스트 선택이 있다면 Swift Testing 단위 테스트와 XCTest UI 테스트를 포함한다.
+5. **Testing System**에서 **Swift Testing**을 선택한다. 확인한 Xcode 27 템플릿의 선택지는 None / XCTest / Swift Testing이고 기본값은 None이다. 생성 후 단위 테스트 target을 확인하고, UI 테스트 target이 없으면 **File → New → Target → UI Testing Bundle**로 XCTest 기반 target을 추가한다.
 6. Organization Identifier는 본인이 관리할 reverse-DNS 형식을 정한다. `com.example` 같은 예시를 배포용으로 그대로 쓰지 않는다.
 7. 이미 Git 저장소 안에서 작업하므로 새 Git 저장소 생성 옵션은 끈다.
 8. 저장 후 최종 경로가 `apps/ios/OROT.xcodeproj`와 `apps/ios/OROT/`가 되도록 배치한다. Xcode가 프로젝트 이름 폴더를 한 겹 더 만들 수 있으므로 Finder에서 확인한다.
 9. 앱 target의 General에서 iOS Deployment Target을 예제 기준인 17.0 이상으로 맞춘다.
-10. 프로젝트 설정에서 Swift Language Version을 확인한다. 예제는 Swift 6 동시성 검사를 염두에 두고 작성했다.
-11. Simulator를 실행 대상으로 선택하고 `⌘R`로 기본 화면을 실행한다.
+10. 아래 4.3의 빌드 설정을 앱 target과 테스트 target에서 확인한다. Swift 컴파일러 버전과 언어 모드는 별개다.
+11. 실행 대상에서 iOS 27 Simulator를 선택하고 `⌘R`로 기본 화면을 실행한다. Xcode 27에서는 Device Hub 창 안에 기기 화면이 나타난다.
 
 처음엔 Signing 때문에 실제 iPhone 실행이 막혀도 Simulator로 화면 학습을 진행할 수 있다. 실기기 서명은 15장에서 다룬다.
 
-### 4.3 Xcode의 단어 이해하기
+### 4.3 Xcode 27의 Swift 설정을 명시적으로 맞추기
+
+Project navigator에서 프로젝트를 선택하고 **TARGETS → OROT → Build Settings**로 이동한다. 필터를 **All**로 두고 아래 설정 이름을 검색한다. Debug와 Release 양쪽에 같은 의도대로 적용되었는지 확인한다.
+
+| 설정 | 이 가이드에서 사용할 값 | 이유 |
+|---|---|---|
+| Swift Language Version (`SWIFT_VERSION`) | Swift 6 / `6.0` | 예제를 Swift 6 오류 검사로 검증 |
+| Default Actor Isolation (`SWIFT_DEFAULT_ACTOR_ISOLATION`) | MainActor | 새 앱 템플릿의 UI 중심 격리 유지 |
+| Approachable Concurrency (`SWIFT_APPROACHABLE_CONCURRENCY`) | Yes | 새 템플릿의 동시성 설정 유지 |
+| iOS Deployment Target (`IPHONEOS_DEPLOYMENT_TARGET`) | 17.0 | 예제의 최소 지원 버전 |
+| Base SDK | iOS / 최신 설치 SDK 선택 | 이 환경에서는 iOS 27 SDK 사용 |
+
+**Swift 6.4 컴파일러를 쓴다고 Swift 6 언어 모드가 자동 선택되지는 않는다.** 실제 설치된 Xcode 27의 공통 Swift 프로젝트 템플릿은 `SWIFT_VERSION = 5.0`, `SWIFT_APPROACHABLE_CONCURRENCY = YES`를 갖고, App Base 템플릿은 기본 격리를 MainActor로 설정한다. 이 가이드는 언어 모드를 명시적으로 6.0으로 바꿔 따라가는 구성이다. 템플릿·사용자 선택에 따라 생성 결과가 달라질 수 있으므로 최종 target 값을 확인한다.
+
+테스트 target도 Swift Language Version을 6.0으로 맞춘다. 테스트 target의 기본 격리는 앱과 다를 수 있다. `FeedModel` 등 MainActor 객체를 사용하는 테스트에는 `@MainActor`를 명시하고, 단순 DTO·날짜 함수 테스트까지 공유 UI 상태에 의존하게 만들지 않는다.
+
+이 예제의 화면·서비스에는 `@MainActor`가 명시되어 있어 책임을 코드에서도 읽을 수 있다. 향후 파일 I/O나 CPU 작업을 분리할 때는 `async`만 붙이면 백그라운드로 옮겨진다고 생각하지 않는다. 특히 Approachable Concurrency의 nonisolated async 실행 규칙을 이해한 뒤 별도 actor나 필요한 실행 경계를 설계한다. [빌드 설정의 의미](https://developer.apple.com/documentation/xcode/build-settings-reference)
+
+### 4.4 Xcode의 단어 이해하기
 
 | 용어 | 의미 |
 |---|---|
@@ -217,13 +262,39 @@ xcode-select -p
 
 최신 SDK로 컴파일하면서 더 낮은 iOS를 지원할 수 있다. 단, 화면에서 호출하는 API가 최소 지원 버전에서 제공되는지 확인해야 한다.
 
-### 4.4 기존 Expo 앱과 분리
+### 4.5 기존 Expo 앱과 분리
 
 `apps/mobile/ios/`는 Expo prebuild가 생성·관리하는 위치다. 독립 Swift 앱을 그 안에 넣으면 생성 과정과 충돌할 수 있다. 이 가이드에서는 별도 `apps/ios/`를 제안한다.
 
 Swift 앱의 UI·API 동작을 비교할 때 기존 Expo 앱을 참고한다. 전환 검증이 끝나기 전에 기존 폴더나 테스트를 지우지 않는다.
 
-**완료 기준:** Xcode에서 빈 SwiftUI 앱이 Simulator에 뜨고, 프로젝트의 실제 디스크 위치를 설명할 수 있다.
+### 4.6 Device Hub에서 Simulator와 기기 관리
+
+Xcode 27에서는 **Device Hub**를 기기 관리의 기준으로 사용한다. 여기서 Simulator는 가상 iPhone을 뜻하고, Device Hub는 그 화면과 실제 기기를 다루는 도구다.
+
+1. **Xcode → Open Developer Tool → Device Hub**를 연다. 실행 대상 메뉴의 **Manage Devices…**로도 접근할 수 있다.
+2. 가상 기기가 없다면 sidebar의 **+ → Simulators**에서 iPhone을 선택한다.
+3. 설치된 OS와 기기 모델을 골라 생성한다. 없는 런타임은 Settings → Components에서 먼저 설치한다.
+4. Xcode의 실행 대상으로 그 기기를 선택한다.
+5. `⌘R` 후 Device Hub의 compact 창에서 앱을 조작한다.
+
+다른 Mac에서 만든 Simulator 이름이나 설치 앱은 Git으로 따라오지 않는다. MacBook Air에서 새 가상 기기를 만들어야 한다. Device Hub에 보이는 화면을 확인하는 것과 `xcodebuild test`의 성공 여부도 별도로 기록한다. [Device Hub 관리](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub)
+
+### 4.7 MacBook Air와 Mac mini 역할 분리
+
+```text
+MacBook Air / macOS 27
+  로컬 Git checkout → Xcode 27 → Device Hub 또는 연결한 iPhone
+                                  ↓ 공개 HTTPS API
+Mac mini
+  기존 Funnel → Next.js → FastAPI → PostgreSQL
+```
+
+SSH로 Mac mini 안에서 파일을 편집하는 작업과 MacBook Air의 Xcode가 여는 로컬 파일을 구분한다. 두 컴퓨터의 변경은 Git으로 동기화하며, SSH로 실행한 `open` 명령은 MacBook Air의 Xcode를 열어 주지 않는다.
+
+새 Swift 앱에는 Node·Expo·CocoaPods가 필수가 아니다. Mac mini의 `.env`, DB 데이터, APNs 개인키를 MacBook Air의 앱 폴더로 복사하지 않는다. 서버는 그대로 두고 앱에는 공개 HTTPS API 주소만 설정한다. `apps/mobile/README.md`의 Xcode 26.2 기록은 기존 Expo 앱의 과거 검증 환경이며 이 Swift 가이드의 도구 버전을 정하는 기준이 아니다.
+
+**완료 기준:** MacBook Air의 Xcode 27에서 빈 SwiftUI 앱이 Device Hub의 가상 iPhone에 뜨고, 로컬 프로젝트 위치·API 서버 위치·최소 지원 iOS를 구분할 수 있다.
 
 ## 5. 파일과 폴더 구조
 
@@ -316,7 +387,7 @@ apps/ios/
 
 ### 5.4 Xcode 폴더와 target membership
 
-Finder에 파일이 있다고 반드시 컴파일되는 것은 아니다. 프로젝트의 폴더 동기화 방식 또는 File Inspector의 **Target Membership**을 확인한다. 앱 코드는 앱 target, 테스트 코드는 테스트 target에 들어가야 한다.
+Xcode 27의 프로젝트는 디스크와 동기화되는 폴더를 사용할 수 있다. 이 경우 파일을 추가하면 폴더의 target 소속과 예외 설정에 따라 자동 반영될 수 있어, 예전 group 기반 프로젝트처럼 모든 파일에 일일이 체크하는 흐름과 다르다. 폴더 방식과 File Inspector의 **Target Membership**, target의 **Build Phases**를 함께 확인한다. 앱 코드는 앱 target, 테스트 코드는 테스트 target에 포함되어야 한다. 이 가이드의 `Core/Models` 같은 디렉터리 구조는 그대로 사용할 수 있다.
 
 fixture JSON은 테스트 bundle의 리소스로 포함한다. Keychain 비밀, `.env`, APNs `.p8` 키, 실기기 토큰은 리소스에 추가하지 않는다. 기본 Info.plist는 Xcode가 빌드 설정으로 생성할 수 있으므로, 파일이 안 보인다고 새 plist를 무조건 만들지 않는다.
 
@@ -778,7 +849,7 @@ struct OROTApp: App {
 2. 템플릿의 앱 진입점이 중복되지 않았는지 확인한다.
 3. 공개 API 호스트를 실제 주소로 바꾼다.
 4. `⌘B`로 컴파일한다. 먼저 나타난 컴파일 오류부터 하나씩 해결한다.
-5. Simulator에서 `⌘R`로 실행한다.
+5. 실행 대상에서 iOS 27 Simulator를 선택하고 `⌘R`로 실행한다. Device Hub에서 화면을 확인한다.
 6. 목록 → 정렬 변경 → 당겨 새로고침 → 상세 → 판매처 링크를 확인한다.
 7. 서버에 공개 일정이 없으면 빈 목록이 정상일 수 있다. 개발 화면용 데이터는 Preview·fixture로 만들고, 운영 DB에 더미 일정을 게시하지 않는다.
 8. 10장의 표시 함수, 표지, 공통 색상, 설정 화면 순으로 추가한다.
@@ -1131,7 +1202,10 @@ Xcode에서 `⌘U`는 테스트, `⌘B`는 빌드, `⌘R`은 실행이다. Test 
 ```sh
 xcodebuild -list -project apps/ios/OROT.xcodeproj
 xcodebuild -showdestinations -project apps/ios/OROT.xcodeproj -scheme OROT
+xcodebuild -showBuildSettings -project apps/ios/OROT.xcodeproj -scheme OROT
 ```
+
+마지막 명령의 결과에서 `SWIFT_VERSION`, `SWIFT_DEFAULT_ACTOR_ISOLATION`, `SWIFT_APPROACHABLE_CONCURRENCY`, `IPHONEOS_DEPLOYMENT_TARGET`, `SDKROOT`를 확인한다. 앱 target은 4.3의 설정과 일치해야 한다. Debug 확인만으로 Release도 같다고 가정하지 말고, 필요하면 `-configuration Release`를 붙여 다시 확인한다.
 
 위 출력에서 실제 Simulator ID를 골라 아래 자리표시자를 바꾼다. 기기 이름을 문서에서 복사해 존재한다고 가정하지 않는다.
 
@@ -1153,15 +1227,17 @@ xcodebuild test \
 
 ### 15.1 iPhone 개발 실행
 
-1. Xcode Settings의 Apple Accounts에서 계정을 연결한다.
-2. iPhone을 Mac에 연결하고 기기의 신뢰 요청을 확인한다.
-3. iPhone에서 필요한 Developer Mode를 활성화한다.
-4. 앱 target의 Signing & Capabilities에서 본인 Team과 고유 Bundle Identifier를 선택한다.
-5. 자동 서명 설정을 확인하고 iPhone을 실행 대상으로 선택한다.
-6. `⌘R`로 설치·실행한다.
+1. **MacBook Air의 Xcode → Settings → Apple Accounts**에서 계정을 연결한다.
+2. 처음에는 iPhone을 MacBook Air에 케이블로 연결하고 기기의 신뢰 요청을 확인한다. Mac mini에 연결하는 단계가 아니다.
+3. Device Hub에서 기기를 선택해 페어링 안내를 따른다. 필요하면 iPhone의 Developer Mode를 활성화하고 재시작한다.
+4. 앱 target의 **Signing & Capabilities**에서 본인 Team과 고유 Bundle Identifier를 선택한다.
+5. **Automatically manage signing**을 확인하고 실제 iPhone을 실행 대상으로 선택한다.
+6. `⌘R`로 설치·실행한다. 기기 또는 Device Hub에서 화면을 확인한다.
 7. Wi-Fi와 셀룰러에서 공개 API에 연결되는지 각각 확인한다.
 
-메뉴 위치는 Xcode 버전에 따라 달라질 수 있다. [Simulator·실기기 실행 안내](https://developer.apple.com/documentation/Xcode/running-your-app-on-simulated-or-physical-devices)를 기준으로 확인한다.
+**iOS 27 이상인 iPhone은 새 무선 페어링도 가능하다.** MacBook Air와 같은 Wi-Fi에서 Device Hub의 **+ → Pair Nearby Device…**를 사용한다. 이전 iOS는 케이블로 시작한다. Developer Mode 항목은 최초 페어링을 시작한 뒤 나타날 수 있다. 공개 Funnel API 연결과 로컬 기기 검색은 서로 다른 연결이므로, 인터넷 API가 열린다고 무선 페어링까지 된 것은 아니다. [기기 페어링](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub)
+
+위 절차는 Xcode 27의 Device Hub 흐름을 기준으로 한다. Simulator 실행 성공과 실제 iPhone 실행 성공은 별도로 기록한다. [Simulator·실기기 실행 안내](https://developer.apple.com/documentation/Xcode/running-your-app-on-simulated-or-physical-devices)를 기준으로 확인한다.
 
 개인 Apple 계정으로 할 수 있는 기본 기기 테스트와 Apple Developer Program의 배포·capability 지원은 범위가 다르다. APNs·TestFlight 단계에서는 적절한 유료 프로그램 가입과 Team 권한이 필요하다. 현재 제공 범위는 [멤버십 비교](https://developer.apple.com/support/compare-memberships/)에서 확인한다.
 
@@ -1177,7 +1253,7 @@ xcodebuild test \
 2. 배포용 Bundle ID, 앱 버전, build 번호, 공개 API 주소를 확정한다.
 3. 개인정보 처리·지원 URL, 앱 아이콘, 테스트 설명을 준비한다.
 4. App Store Connect에 앱 레코드를 만든다.
-5. Xcode에서 배포용 실행 대상을 선택하고 **Product → Archive**를 실행한다.
+5. Xcode에서 Simulator가 아닌 iOS 기기용 배포 대상을 선택하고 **Product → Archive**를 실행한다. 예를 들어 실행 대상에 표시되는 **Any iOS Device (arm64)** 계열의 대상을 사용한다. Simulator 빌드는 App Store 배포용 archive가 아니다.
 6. Organizer에서 archive의 앱 식별자·버전·서명을 확인한다.
 7. **Distribute App** 흐름으로 App Store Connect에 업로드한다.
 8. App Store Connect 처리가 끝나면 수출 규정 등 실제 앱에 해당하는 정보를 작성한다.
@@ -1225,7 +1301,9 @@ Swift 앱에는 Expo Metro나 EAS가 필요하지 않다. 설치 앱 자체는 X
 | 타입을 찾을 수 없음 | 파일 target membership, 이름, 접근 수준 |
 | `@main` 관련 오류 | 템플릿과 새 OROTApp 진입점 중복 |
 | iOS 버전 사용 가능성 오류 | Deployment Target과 해당 API 지원 버전 |
-| actor isolation 오류 | UI 상태와 서비스의 MainActor 경계, await 누락 |
+| actor isolation 오류 | Swift 언어 모드·Default Actor Isolation·Approachable Concurrency·await 확인 |
+| 설치된 Xcode는 27인데 다른 SDK가 나옴 | `xcode-select -p`, 선택된 toolchain, 로컬 터미널인지 SSH인지 확인 |
+| 가상 iPhone이 실행 대상에 없음 | Settings → Components의 런타임과 Device Hub의 기기 생성 여부 |
 | 실제 API 대신 HTML이 옴 | 공개 URL 경로, 프록시 오류, 상태 코드·Content-Type |
 | Simulator는 되는데 iPhone은 안 됨 | localhost·Docker 주소 사용 여부, HTTPS 공개 연결 |
 | 날짜가 하루 다름 | 날짜만 있는 값을 UTC 순간으로 바꿨는지 |
@@ -1284,6 +1362,10 @@ APNs 키, 설치 비밀, 실제 기기 토큰, `.env`를 질문에 붙이지 않
 ### 공식 학습 자료
 
 - [Swift 언어 가이드](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/) — Optional·구조체·프로토콜·동시성.
+- [Xcode 27 정식 릴리스 노트](https://developer.apple.com/documentation/xcode-release-notes/xcode-27-release-notes) — 실제 도구 버전·호환 요구.
+- [Xcode Components](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components) — 플랫폼과 런타임 설치.
+- [Device Hub](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub) — 가상·실제 기기 관리.
+- [빌드 설정](https://developer.apple.com/documentation/xcode/build-settings-reference) — 언어 모드와 동시성 옵션.
 - [Apple Develop in Swift](https://developer.apple.com/tutorials/develop-in-swift) — Xcode와 앱 개발 입문.
 - [SwiftUI](https://developer.apple.com/documentation/swiftui) — 화면 구성 API.
 - [모델 데이터와 Observation](https://developer.apple.com/documentation/SwiftUI/Managing-model-data-in-your-app) — 상태 소유·관찰.
